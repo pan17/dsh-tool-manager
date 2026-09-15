@@ -1,0 +1,4 @@
+# dsh bundle layer: mount the Host tool-policy manager.
+- insert:
+    - id: dsh-tool-manager
+      name: 'dsh-tool-manager'
