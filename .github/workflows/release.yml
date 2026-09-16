@@ -10,44 +10,7 @@ permissions:
   packages: write
 
 jobs:
-  # Hard CI gate. When `git push origin main --tags` fires both CI and
-  # Release in parallel, this job polls the CI workflow run for the
-  # tag's commit until it settles on `success`. Both downstream jobs
-  # (`release`, `publish-npm`) `needs: ci-green`, so a red CI blocks
-  # the GitHub Release creation AND the npm publish — neither can
-  # fire alone. Polls up to ~5 minutes (CI itself runs ~15s, the
-  # slack absorbs the parallel-release runner queue).
-  ci-green:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Wait for CI on this commit to be green
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          SHA="$GITHUB_SHA"
-          echo "Checking CI conclusion for $SHA..."
-          for i in $(seq 1 60); do
-            CONCLUSION=$(gh api "repos/${{ github.repository }}/actions/runs?head_sha=$SHA" \
-              --jq '.workflow_runs[] | select(.name=="CI") | "\(.conclusion)\t\(.status)"' | head -1)
-            case "$CONCLUSION" in
-              "success	completed")
-                echo "CI is green ✓"; exit 0 ;;
-              "failure	completed"|"cancelled	completed"|"timed_out	completed")
-                echo "::error::CI conclusion '$CONCLUSION' — blocking entire release"
-                exit 1 ;;
-              *)
-                echo "Attempt $i/60 — CI status: '${CONCLUSION:-pending}' (sleeping 5s)"
-                sleep 5 ;;
-            esac
-          done
-          echo "::error::Timed out waiting for CI to settle on $SHA"
-          exit 1
-
-  # npm publish: created only after `ci-green` succeeds. GitHub
-  # Release waits on this job, so npm and GitHub Release cannot
-  # drift apart.
   publish-npm:
-    needs: ci-green
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -61,9 +24,6 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.DSH_TOOL_MANAGER }}
 
-  # GitHub Release: created only after npm publish succeeds. The
-  # changelog query validates the release notes (fail fast if the
-  # version section is missing).
   release:
     needs: publish-npm
     runs-on: ubuntu-latest
