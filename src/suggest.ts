@@ -7,6 +7,7 @@ import type {
 } from "./dsh.js";
 
 export const MAX_SUGGESTION_TOOLS = 64;
+export const MAX_CUSTOM_PROMPT_LENGTH = 32_000;
 export const MAX_AUTO_GROUP_TOOLS = 120;
 export const MAX_AUTO_GROUPS = 32;
 export const MAX_GROUP_NAME_LENGTH = 40;
@@ -27,6 +28,7 @@ export interface GroupSuggestion {
 export interface GroupSuggestionRequest {
   tools: ToolSchemaLike[];
   otherGroupNames: string[];
+  prompt?: string;
 }
 
 export interface AutoGroupSuggestion extends GroupSuggestion {
@@ -41,6 +43,7 @@ export interface AutoGroupResult {
 export interface AutoGroupRequest {
   tools: ToolSchemaLike[];
   otherGroupNames: string[];
+  prompt?: string;
 }
 
 export async function generateGroupSuggestion(
@@ -54,12 +57,14 @@ export async function generateGroupSuggestion(
     throw new Error(`一次最多根据 ${MAX_SUGGESTION_TOOLS} 个工具生成分组`);
   }
 
+  const customPrompt = normalizeCustomPrompt(request.prompt);
+  const prompt = customPrompt ?? buildSuggestionPrompt(request);
   const selection = validateSelection(defaultModel.currentSelection());
   const effectiveTimeoutMs = validateGenerationTimeout(timeoutMs);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort("tool-manager group suggestion timed out"), effectiveTimeoutMs);
   try {
-    const text = await collectModelText(llm, selection, buildSuggestionPrompt(request), controller.signal);
+    const text = await collectModelText(llm, selection, prompt, controller.signal);
     const suggestion = parseGroupSuggestion(text);
     const conflicts = new Set(request.otherGroupNames.map(normalizeComparableName));
     if (conflicts.has(normalizeComparableName(suggestion.name))) {
@@ -103,6 +108,17 @@ export function normalizeGroupNames(value: unknown): string[] {
   }).filter(Boolean))];
 }
 
+export function normalizeCustomPrompt(prompt: unknown): string | undefined {
+  if (prompt === undefined || prompt === null) return undefined;
+  if (typeof prompt !== "string") throw new Error("prompt must be a string");
+  const trimmed = prompt.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.length > MAX_CUSTOM_PROMPT_LENGTH) {
+    throw new Error(`提示词过长（超过 ${MAX_CUSTOM_PROMPT_LENGTH} 个字符）`);
+  }
+  return trimmed;
+}
+
 export async function generateAutoGroups(
   llm: LlmRuntimeLike,
   defaultModel: AgentDefaultModelLike,
@@ -113,6 +129,8 @@ export async function generateAutoGroups(
   if (request.tools.length > MAX_AUTO_GROUP_TOOLS) {
     throw new Error(`自动分组一次最多处理 ${MAX_AUTO_GROUP_TOOLS} 个工具，请先手工缩小范围`);
   }
+  const customPrompt = normalizeCustomPrompt(request.prompt);
+  const prompt = customPrompt ?? buildAutoGroupPrompt(request);
   const selection = validateSelection(defaultModel.currentSelection());
   const effectiveTimeoutMs = validateGenerationTimeout(timeoutMs);
   const controller = new AbortController();
@@ -121,7 +139,7 @@ export async function generateAutoGroups(
     const text = await collectModelText(
       llm,
       selection,
-      buildAutoGroupPrompt(request),
+      prompt,
       controller.signal,
       1_600,
     );

@@ -152,6 +152,47 @@ window.__ModuleLoader__.load({
 			return name;
 		}
 
+		function defaultAutoGroupPrompt(tools, otherGroupNames) {
+			const list = (tools || []).map((tool) => ({
+				name: String(tool.name || "").slice(0, 160),
+				description: String(tool.description || "").trim().replace(/\s+/g, " ").slice(0, 600),
+			}));
+			const forbidden = (otherGroupNames && otherGroupNames.length > 0) ? otherGroupNames : ["（无）"];
+			return [
+				"请把以下尚未分组的工具按共同能力和使用场景聚类成多个按需工具组，并为每组生成中文名称和描述。",
+				"要求：",
+				"1. 每个工具最多出现在一个组；tools 必须使用输入中的精确工具名。",
+				"2. 不要为了覆盖全部工具而制造不合理分组；不适合归组的工具放入 ungrouped。",
+				"3. 避免只有一个工具的碎片组，也避免含义模糊、规模过大的杂项组；组数由工具语义决定。",
+				"4. 每组名称使用简洁自然的中文，建议 2 到 10 个汉字；描述用一句简洁中文概括用途。",
+				"5. 新组名称互不重复，且不得与这些现有分组重名：" + forbidden.join("、") + "。",
+				"6. 最多生成 32 个组；名称不超过 40 个字符，描述不超过 240 个字符。",
+				"7. 只输出一个 JSON 对象，不要输出 Markdown、解释或额外字段。",
+				'格式：{"groups":[{"name":"...","description":"...","tools":["exact_name"]}],"ungrouped":["exact_name"]}',
+				"候选工具：",
+				JSON.stringify(list, null, 2),
+			].join("\n");
+		}
+
+		function defaultGroupSuggestionPrompt(tools, otherGroupNames) {
+			const list = (tools || []).map((tool) => ({
+				name: String(tool.name || "").slice(0, 160),
+				description: String(tool.description || "").trim().replace(/\s+/g, " ").slice(0, 600),
+			}));
+			const forbidden = (otherGroupNames && otherGroupNames.length > 0) ? otherGroupNames : ["（无）"];
+			return [
+				"请根据以下已选择的工具，为一个按需工具组生成名称和描述。",
+				"要求：",
+				"1. 名称使用简洁自然的中文，概括共同用途，建议 2 到 10 个汉字。",
+				"2. 描述使用一句简洁中文，说明该组适合完成什么任务，不要逐个罗列工具。",
+				"3. 名称不得与这些其他分组重名：" + forbidden.join("、") + "。",
+				"4. 名称不超过 40 个字符，描述不超过 240 个字符。",
+				'5. 只输出一个 JSON 对象，不要输出 Markdown、解释或额外字段。格式：{"name":"...","description":"..."}',
+				"已选择工具：",
+				JSON.stringify(list, null, 2),
+			].join("\n");
+		}
+
 		function ToolManagerSection() {
 			const [snapshot, setSnapshot] = react.useState(null);
 			const [draft, setDraft] = react.useState(null);
@@ -190,13 +231,17 @@ window.__ModuleLoader__.load({
 				return () => window.removeEventListener("beforeunload", onBeforeUnload);
 			}, [dirty]);
 			react.useEffect(() => {
-				if (!modal) return undefined;
+				if (!modal && !aiConfirm && !autoPreview) return undefined;
 				function onKeyDown(event) {
-					if (event.key === "Escape") setModal(null);
+					if (event.key === "Escape") {
+						if (aiConfirm) setAiConfirm(null);
+						else if (autoPreview) setAutoPreview(null);
+						else if (modal) setModal(null);
+					}
 				}
 				window.addEventListener("keydown", onKeyDown);
 				return () => window.removeEventListener("keydown", onKeyDown);
-			}, [modal]);
+			}, [modal, aiConfirm, autoPreview]);
 
 			if (!draft) return h("div", { className: "tm_root" }, error ? h("div", { className: "tm_error" }, error) : h("div", { className: "tm_muted" }, "正在读取工具目录…"));
 			const preset = draft.presets.find((item) => item.id === active) || draft.presets[0];
@@ -259,6 +304,10 @@ window.__ModuleLoader__.load({
 				setModal((current) => current ? { ...current, ...patch } : current);
 			}
 
+			function patchAiConfirm(patch) {
+				setAiConfirm((current) => current ? { ...current, ...patch } : current);
+			}
+
 			function generateGroupDetails() {
 				if (!modal || modal.generating || !(modal.patterns || []).length) return;
 				const key = modal.key;
@@ -267,24 +316,29 @@ window.__ModuleLoader__.load({
 					.map((group) => group.name)
 					.filter(Boolean);
 				const eligible = new Set(eligibleGroupTools(preset, key).map((tool) => tool.name));
-				const toolNames = matchingTools(preset.tools, modal.patterns || [])
-					.filter((tool) => eligible.has(tool.name))
-					.map((tool) => tool.name);
+				const selectedTools = matchingTools(preset.tools, modal.patterns || [])
+					.filter((tool) => eligible.has(tool.name));
+				const toolNames = selectedTools.map((tool) => tool.name);
 				if (!toolNames.length) {
 					patchModal({ generateError: "所选模式当前没有匹配到工具，请重新勾选。" });
 					return;
 				}
+				const initialPrompt = defaultGroupSuggestionPrompt(selectedTools, otherGroupNames);
 				setAiConfirm({
 					kind: "suggest",
 					title: "确认自动生成名称和描述",
 					message: "将所选工具的名称和描述发送给当前默认模型，并产生一次模型请求。",
 					timeoutSeconds: suggestionTimeoutSeconds,
-					run: (timeoutMs) => {
+					prompt: initialPrompt,
+					promptCustom: false,
+					showPrompt: false,
+					error: "",
+					run: (timeoutMs, _tools, prompt) => {
 						setSuggestionTimeoutSeconds(String(timeoutMs / 1000));
 						patchModal({ generating: true, generateError: "" });
 						api("/suggest-group", {
 							method: "POST",
-							body: JSON.stringify({ presetId: preset.id, toolNames, otherGroupNames, timeoutMs }),
+							body: JSON.stringify({ presetId: preset.id, toolNames, otherGroupNames, timeoutMs, prompt }),
 						}).then((suggestion) => {
 							setModal((current) => current && current.key === key
 								? { ...current, name: suggestion.name || current.name, description: suggestion.description || current.description, generating: false, generateError: "" }
@@ -325,8 +379,8 @@ window.__ModuleLoader__.load({
 				if (created) setExpanded((current) => ({ ...current, [key]: true }));
 			}
 
-			function autoGroupSignature(toolNames) {
-				return preset.id + "\n" + [...toolNames].sort().join("\n");
+			function autoGroupSignature(toolNames, otherGroupNames = []) {
+				return preset.id + "\n" + [...toolNames].sort().join("\n") + "\n---\n" + [...otherGroupNames].sort().join("\n");
 			}
 
 			function startAutoGroup() {
@@ -338,22 +392,29 @@ window.__ModuleLoader__.load({
 					setAutoGroupError("当前没有未分组且未关闭的工具。");
 					return;
 				}
-				const toolNames = candidates.map((tool) => tool.name);
-				const signature = autoGroupSignature(toolNames);
+				const allCandidateNames = candidates.map((tool) => tool.name);
 				const otherGroupNames = (preset.policy.groups || []).map((group) => group.name).filter(Boolean);
+				const initialPrompt = defaultAutoGroupPrompt(candidates, otherGroupNames);
 				setAiConfirm({
 					kind: "auto-group",
 					title: "确认自动分组",
-					message: "将当前未分组且未关闭的 " + toolNames.length + " 个工具发送给默认模型，并产生一次模型请求。",
+					message: "筛选并勾选需要分组的工具，发送给当前默认模型进行聚类。",
 					timeoutSeconds: autoGroupTimeoutSeconds,
-					run: (timeoutMs) => {
+					query: "",
+					selected: allCandidateNames,
+					prompt: initialPrompt,
+					promptCustom: false,
+					showPrompt: false,
+					error: "",
+					run: (timeoutMs, selectedToolNames, prompt) => {
 						setAutoGroupTimeoutSeconds(String(timeoutMs / 1000));
 						setAutoGrouping(true); setAutoGroupError(""); setAutoPreview(null);
+						const signature = autoGroupSignature(selectedToolNames, otherGroupNames);
 						api("/auto-group", {
 							method: "POST",
-							body: JSON.stringify({ presetId: preset.id, toolNames, otherGroupNames, timeoutMs }),
+							body: JSON.stringify({ presetId: preset.id, toolNames: selectedToolNames, otherGroupNames, timeoutMs, prompt }),
 						}).then((result) => {
-							setAutoPreview({ presetId: preset.id, signature, groups: result.groups || [], ungrouped: result.ungrouped || [] });
+							setAutoPreview({ presetId: preset.id, signature, selectedTools: selectedToolNames, groups: result.groups || [], ungrouped: result.ungrouped || [] });
 						}).catch((e) => setAutoGroupError(String(e.message || e))).finally(() => setAutoGrouping(false));
 					},
 				});
@@ -363,22 +424,45 @@ window.__ModuleLoader__.load({
 				if (!aiConfirm) return;
 				const seconds = Number(aiConfirm.timeoutSeconds);
 				if (!Number.isInteger(seconds) || seconds < 5 || seconds > 600) {
-					setAiConfirm((current) => current ? { ...current, error: "超时时间必须是 5 到 600 之间的整数秒。" } : current);
+					patchAiConfirm({ error: "超时时间必须是 5 到 600 之间的整数秒。" });
 					return;
+				}
+				const selected = aiConfirm.selected || [];
+				let prompt = String(aiConfirm.prompt || "").trim();
+				if (!prompt) {
+					patchAiConfirm({ error: "提示词不能为空，请输入有效提示词或点击重置为默认。" });
+					return;
+				}
+				if (prompt.length > 32000) {
+					patchAiConfirm({ error: "提示词不能超过 32000 个字符。" });
+					return;
+				}
+				if (aiConfirm.kind === "auto-group") {
+					if (selected.length === 0) {
+						patchAiConfirm({ error: "请至少勾选一个工具进行分组。" });
+						return;
+					}
+					if (selected.length > 120) {
+						patchAiConfirm({ error: "一次最多勾选 120 个工具进行分组。" });
+						return;
+					}
 				}
 				const run = aiConfirm.run;
 				setAiConfirm(null);
-				run(seconds * 1000);
+				run(seconds * 1000, selected, prompt);
 			}
 
 			function applyAutoGroups() {
 				if (!autoPreview || autoPreview.presetId !== preset.id) return;
 				const disabledNames = new Set(preset.policy.disabled || []);
 				const alreadyGrouped = groupedNames(preset);
-				const currentCandidates = (preset.tools || []).filter((tool) => !disabledNames.has(tool.name) && !alreadyGrouped.has(tool.name)).map((tool) => tool.name);
-				if (autoPreview.signature !== autoGroupSignature(currentCandidates)) {
+				const allPresetToolNames = new Set((preset.tools || []).map((tool) => tool.name));
+				const targetTools = autoPreview.selectedTools || (preset.tools || []).filter((tool) => !disabledNames.has(tool.name) && !alreadyGrouped.has(tool.name)).map((tool) => tool.name);
+				const validSelected = targetTools.filter((name) => allPresetToolNames.has(name) && !disabledNames.has(name) && !alreadyGrouped.has(name));
+				const currentOtherGroupNames = (preset.policy.groups || []).map((group) => group.name).filter(Boolean);
+				if (autoPreview.signature !== autoGroupSignature(validSelected, currentOtherGroupNames)) {
 					setAutoPreview(null);
-					setAutoGroupError("工具或分组草稿已经变化，请重新自动分组。");
+					setAutoGroupError("所选工具或分组草稿已经变化，请重新自动分组。");
 					return;
 				}
 				const addedKeys = [];
@@ -471,6 +555,27 @@ window.__ModuleLoader__.load({
 			const modalInvalidSelected = modal ? [...modalSelected].filter((name) => !modalEligibleNames.has(name)) : [];
 			const canConfirm = !!(modal && String(modal.name || "").trim() && modalMatchedTools.length > 0 && modalInvalidSelected.length === 0);
 			const listedGroups = showGroups ? visibleGroups : [];
+			const aiIsAutoGroup = !!(aiConfirm && aiConfirm.kind === "auto-group");
+			const aiNeedle = String(aiConfirm && aiConfirm.query || "").trim().toLowerCase();
+			const aiCandidates = (preset.tools || []).filter((tool) => !disabled.has(tool.name) && !grouped.has(tool.name));
+			const aiVisibleCandidates = aiIsAutoGroup ? aiCandidates.filter((tool) => matchesQuery(tool, aiNeedle)) : [];
+			const aiSelected = new Set(aiConfirm && aiConfirm.selected ? aiConfirm.selected : []);
+			const aiVisibleSelected = aiVisibleCandidates.filter((tool) => aiSelected.has(tool.name)).map((tool) => tool.name);
+			const aiPromptTrimmed = String(aiConfirm && aiConfirm.prompt || "").trim();
+			const aiPromptTooLong = String(aiConfirm && aiConfirm.prompt || "").length > 32000;
+			const aiCanConfirm = aiPromptTrimmed.length > 0 && !aiPromptTooLong && (!aiIsAutoGroup || (aiSelected.size > 0 && aiSelected.size <= 120));
+
+			function updateAutoGroupSelection(nextSelectedNames) {
+				const nextSelected = [...new Set(nextSelectedNames)];
+				const patch = { selected: nextSelected, error: "" };
+				if (aiConfirm && !aiConfirm.promptCustom) {
+					const nextSelectedSet = new Set(nextSelected);
+					const nextTools = (preset.tools || []).filter((t) => nextSelectedSet.has(t.name));
+					const otherGroupNames = (preset.policy.groups || []).map((g) => g.name).filter(Boolean);
+					patch.prompt = defaultAutoGroupPrompt(nextTools, otherGroupNames);
+				}
+				patchAiConfirm(patch);
+			}
 
 			function renderGroup(group) {
 				const key = group._key;
@@ -514,12 +619,139 @@ window.__ModuleLoader__.load({
 			const aiConfirmDialog = aiConfirm && typeof document !== "undefined" ? reactDom.createPortal(
 				h("div", { className: "tm_modal", role: "dialog", "aria-modal": "true", "aria-label": aiConfirm.title },
 					h("div", { className: "tm_modal_mask", onMouseDown: () => setAiConfirm(null) }),
-					h("div", { className: "tm_modal_card tm_confirm_card" },
+					h("div", { className: "tm_modal_card" },
 						h("div", { className: "tm_modal_head" },
 							h("div", null, h("h3", null, aiConfirm.title), h("div", { className: "tm_muted" }, aiConfirm.message)),
 							h("button", { className: "tm_btn", onClick: () => setAiConfirm(null) }, "关闭"),
 						),
 						h("div", { className: "tm_modal_body" },
+							aiIsAutoGroup ? [
+								h("div", { className: "tm_row", key: "row" },
+									h("input", {
+										className: "tm_input",
+										value: aiConfirm.query || "",
+										placeholder: "筛选工具名或描述",
+										onChange: (e) => patchAiConfirm({ query: e.target.value }),
+									}),
+									h("button", {
+										className: "tm_btn",
+										disabled: aiVisibleCandidates.length === 0 || aiVisibleCandidates.every((tool) => aiSelected.has(tool.name)),
+										onClick: () => updateAutoGroupSelection([...(aiConfirm.selected || []), ...aiVisibleCandidates.map((tool) => tool.name)]),
+									}, "全选当前筛选"),
+									h("button", {
+										className: "tm_btn",
+										disabled: aiVisibleSelected.length === 0,
+										onClick: () => updateAutoGroupSelection((aiConfirm.selected || []).filter((name) => !aiVisibleSelected.includes(name))),
+									}, "清除当前筛选"),
+								),
+								aiSelected.size === 0
+									? h("div", { className: "tm_error", key: "status" }, "请至少勾选一个工具进行分组。")
+									: (aiSelected.size > 120
+										? h("div", { className: "tm_error", key: "status" }, "自动分组一次最多处理 120 个工具，当前已勾选 " + aiSelected.size + " 个，请减少勾选。")
+										: h("div", { className: "tm_muted", key: "status" }, "已勾选 " + aiSelected.size + " / " + aiCandidates.length + " 个候选工具。自动分组会调用当前默认模型，结果仍可手动修改。")),
+								aiVisibleCandidates.length
+									? h("div", { className: "tm_picker", key: "picker" }, aiVisibleCandidates.map((tool) => h("label", { className: "tm_pick", key: tool.name },
+										h("input", {
+											type: "checkbox",
+											checked: aiSelected.has(tool.name),
+											onChange: (e) => {
+												const next = new Set(aiConfirm.selected || []);
+												if (e.target.checked) next.add(tool.name); else next.delete(tool.name);
+												updateAutoGroupSelection([...next]);
+											},
+										}),
+										h("span", null,
+											h("div", { className: "tm_tool_name" }, tool.name),
+											h("div", { className: "tm_tool_desc", title: tool.description }, tool.description),
+										),
+									)))
+									: h("div", { className: "tm_muted", key: "empty", style: { padding: "12px" } }, aiCandidates.length ? "没有符合筛选的工具。" : "当前没有可分组的工具。"),
+							] : null,
+							h("div", {
+								style: {
+									border: "1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, .2))",
+									borderRadius: "8px",
+									padding: "10px 12px",
+									background: "var(--dsw-alias-bg-layer-1, rgba(128, 128, 128, .04))",
+								},
+								key: "promptSection",
+							},
+								h("div", {
+									style: {
+										display: "flex",
+										alignItems: "center",
+										justifyContent: "space-between",
+										gap: "8px",
+										flexWrap: "wrap",
+									},
+								},
+									h("div", { style: { display: "flex", alignItems: "center", gap: "6px" } },
+										h("button", {
+											type: "button",
+											className: "tm_btn",
+											style: { fontSize: "11px", padding: "4px 8px" },
+											onClick: () => patchAiConfirm({ showPrompt: !aiConfirm.showPrompt }),
+										}, aiConfirm.showPrompt ? "▾ 收起提示词" : "▸ 预览与编辑提示词"),
+										h("span", { className: "tm_muted" },
+											aiConfirm.promptCustom
+												? "已自定义（共 " + (aiConfirm.prompt || "").length + " 字符）"
+												: "默认提示词（共 " + (aiConfirm.prompt || "").length + " 字符）",
+										),
+										aiConfirm.promptCustom ? h("span", { className: "tm_badge cold" }, "已修改") : null,
+									),
+									aiConfirm.showPrompt ? h("button", {
+										type: "button",
+										className: "tm_btn",
+										style: { fontSize: "11px", padding: "4px 8px" },
+										disabled: !aiConfirm.promptCustom,
+										onClick: () => {
+											if (aiIsAutoGroup) {
+												const selectedTools = (preset.tools || []).filter((t) => aiSelected.has(t.name));
+												const otherGroupNames = (preset.policy.groups || []).map((g) => g.name).filter(Boolean);
+												patchAiConfirm({
+													prompt: defaultAutoGroupPrompt(selectedTools, otherGroupNames),
+													promptCustom: false,
+													error: "",
+												});
+											} else if (modal) {
+												const key = modal.key;
+												const otherGroupNames = (preset.policy.groups || [])
+													.filter((group) => group._key !== key)
+													.map((group) => group.name)
+													.filter(Boolean);
+												const eligible = new Set(eligibleGroupTools(preset, key).map((tool) => tool.name));
+												const selectedTools = matchingTools(preset.tools, modal.patterns || [])
+													.filter((tool) => eligible.has(tool.name));
+												patchAiConfirm({
+													prompt: defaultGroupSuggestionPrompt(selectedTools, otherGroupNames),
+													promptCustom: false,
+													error: "",
+												});
+											}
+										},
+									}, "重置为默认提示词") : null,
+								),
+								aiConfirm.showPrompt ? h("div", { style: { marginTop: "8px" } },
+									h("textarea", {
+										className: "tm_input",
+										style: {
+											width: "100%",
+											minHeight: "140px",
+											maxHeight: "280px",
+											resize: "vertical",
+											fontFamily: "ui-monospace, SFMono-Regular, Consolas, monospace",
+											fontSize: "11px",
+											lineHeight: "1.45",
+											whiteSpace: "pre-wrap",
+										},
+										value: aiConfirm.prompt || "",
+										placeholder: "提示词内容...",
+										onChange: (e) => patchAiConfirm({ prompt: e.target.value, promptCustom: true, error: "" }),
+									}),
+									!aiPromptTrimmed ? h("div", { className: "tm_error", style: { marginTop: "6px" } }, "提示词不能为空，请输入有效提示词或点击重置为默认。")
+										: (aiPromptTooLong ? h("div", { className: "tm_error", style: { marginTop: "6px" } }, "提示词不能超过 32000 个字符，当前共 " + (aiConfirm.prompt || "").length + " 个字符。") : null),
+								) : null,
+							),
 							h("label", { className: "tm_timeout_field" },
 								h("span", null, "超时时间"),
 								h("input", {
@@ -529,7 +761,7 @@ window.__ModuleLoader__.load({
 									max: 600,
 									step: 1,
 									value: aiConfirm.timeoutSeconds,
-									onChange: (event) => setAiConfirm((current) => current ? { ...current, timeoutSeconds: event.target.value, error: "" } : current),
+									onChange: (event) => patchAiConfirm({ timeoutSeconds: event.target.value, error: "" }),
 								}),
 								h("span", { className: "tm_muted" }, "秒（5–600）"),
 							),
@@ -537,7 +769,7 @@ window.__ModuleLoader__.load({
 						),
 						h("div", { className: "tm_modal_foot" },
 							h("button", { className: "tm_btn", onClick: () => setAiConfirm(null) }, "取消"),
-							h("button", { className: "tm_btn primary", onClick: confirmAiRequest }, "确认执行"),
+							h("button", { className: "tm_btn primary", disabled: !aiCanConfirm, onClick: confirmAiRequest }, "确认执行"),
 						),
 					),
 				),

@@ -1,10 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  MAX_CUSTOM_PROMPT_LENGTH,
   buildAutoGroupPrompt,
   buildSuggestionPrompt,
   generateAutoGroups,
   generateGroupSuggestion,
+  normalizeCustomPrompt,
   normalizeGroupNames,
   parseAutoGroupResult,
   parseGroupSuggestion,
@@ -148,6 +150,74 @@ describe("tool-manager group suggestions", () => {
     assert.equal(result.groups[0].name, "网页研究");
     assert.deepEqual(result.ungrouped, ["read"]);
     assert.equal(options.maxTokens, 1600);
+  });
+
+  it("generates auto-groups for a subset of selected tools only", async () => {
+    let promptText = "";
+    const selectedSubset = tools.slice(0, 2); // web_search, web_fetch
+    const llm = {
+      async *stream(value) {
+        promptText = value.messages?.[0]?.content?.[0]?.text ?? "";
+        yield { type: "text-delta", index: 0, text: '{"groups":[{"name":"搜索工具","description":"网页搜索。","tools":["web_search"]}],"ungrouped":["web_fetch"]}' };
+        yield { type: "finish", reason: { kind: "stop" } };
+      },
+    };
+    const result = await generateAutoGroups(llm, {
+      currentSelection: () => ({ provider: "deepseek", model: "chat" }),
+    }, { tools: selectedSubset, otherGroupNames: [] });
+    assert.match(promptText, /web_search/);
+    assert.match(promptText, /web_fetch/);
+    assert.doesNotMatch(promptText, /"read"/);
+    assert.deepEqual(result, {
+      groups: [{ name: "搜索工具", description: "网页搜索。", tools: ["web_search"] }],
+      ungrouped: ["web_fetch"],
+    });
+  });
+
+  it("normalizes and validates custom prompts", () => {
+    assert.equal(normalizeCustomPrompt(undefined), undefined);
+    assert.equal(normalizeCustomPrompt(null), undefined);
+    assert.equal(normalizeCustomPrompt(""), undefined);
+    assert.equal(normalizeCustomPrompt("   "), undefined);
+    assert.equal(normalizeCustomPrompt("  自定义提示词  "), "自定义提示词");
+    assert.throws(() => normalizeCustomPrompt(123), /prompt must be a string/);
+    assert.throws(() => normalizeCustomPrompt("a".repeat(MAX_CUSTOM_PROMPT_LENGTH + 1)), /提示词过长/);
+  });
+
+  it("uses custom prompt in generateGroupSuggestion when provided", async () => {
+    let promptText = "";
+    const llm = {
+      async *stream(value) {
+        promptText = value.messages?.[0]?.content?.[0]?.text ?? "";
+        yield { type: "text-delta", index: 0, text: '{"name":"定制名称","description":"按定制提示生成的描述。"}' };
+        yield { type: "finish", reason: { kind: "stop" } };
+      },
+    };
+    const customPrompt = "自定义提示词：为网络类工具生成名称和描述";
+    const result = await generateGroupSuggestion(llm, {
+      currentSelection: () => ({ provider: "deepseek", model: "chat" }),
+    }, { tools: tools.slice(0, 2), otherGroupNames: [], prompt: customPrompt });
+    assert.equal(promptText, customPrompt);
+    assert.deepEqual(result, { name: "定制名称", description: "按定制提示生成的描述。" });
+  });
+
+  it("uses custom prompt in generateAutoGroups when provided", async () => {
+    let promptText = "";
+    const selectedSubset = tools.slice(0, 2);
+    const llm = {
+      async *stream(value) {
+        promptText = value.messages?.[0]?.content?.[0]?.text ?? "";
+        yield { type: "text-delta", index: 0, text: '{"groups":[{"name":"自定义组","description":"自定义说明。","tools":["web_search","web_fetch"]}],"ungrouped":[]}' };
+        yield { type: "finish", reason: { kind: "stop" } };
+      },
+    };
+    const customPrompt = "自定义提示词：请将所有网络工具归为自定义组";
+    const result = await generateAutoGroups(llm, {
+      currentSelection: () => ({ provider: "deepseek", model: "chat" }),
+    }, { tools: selectedSubset, otherGroupNames: [], prompt: customPrompt });
+    assert.equal(promptText, customPrompt);
+    assert.equal(result.groups[0].name, "自定义组");
+    assert.deepEqual(result.groups[0].tools, ["web_search", "web_fetch"]);
   });
 
   it("validates configurable generation timeouts", () => {

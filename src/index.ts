@@ -15,6 +15,7 @@ import {
   generateAutoGroups,
   generateGroupSuggestion,
   MAX_AUTO_GROUP_TOOLS,
+  normalizeCustomPrompt,
   normalizeGroupNames,
   validateGenerationTimeout,
   selectSuggestionTools,
@@ -99,7 +100,9 @@ export function apply(ctx: unknown): void {
           const timeoutMs = body?.timeoutMs === undefined
             ? undefined
             : validateGenerationTimeout(body.timeoutMs);
-          return generateGroupSuggestion(llm, defaultModel, { tools: selected, otherGroupNames }, timeoutMs);
+          const prompt = normalizeCustomPrompt(body?.prompt);
+          if (body?.prompt !== undefined && prompt === undefined) throw new Error("提示词不能为空");
+          return generateGroupSuggestion(llm, defaultModel, { tools: selected, otherGroupNames, prompt }, timeoutMs);
         })().then(
           (suggestion) => sendJson(res, 200, suggestion),
           (error) => sendJson(res, 400, { ok: false, message: errorMessage(error) }),
@@ -134,7 +137,9 @@ export function apply(ctx: unknown): void {
           const timeoutMs = body?.timeoutMs === undefined
             ? undefined
             : validateGenerationTimeout(body.timeoutMs);
-          return generateAutoGroups(llm, defaultModel, { tools: selected, otherGroupNames }, timeoutMs);
+          const prompt = normalizeCustomPrompt(body?.prompt);
+          if (body?.prompt !== undefined && prompt === undefined) throw new Error("提示词不能为空");
+          return generateAutoGroups(llm, defaultModel, { tools: selected, otherGroupNames, prompt }, timeoutMs);
         })().then(
           (result) => sendJson(res, 200, result),
           (error) => sendJson(res, 400, { ok: false, message: errorMessage(error) }),
