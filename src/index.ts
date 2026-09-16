@@ -7,7 +7,7 @@ import type {
 } from "./dsh.js";
 import { asRecord } from "./dsh.js";
 import { ToolManagerConfigStore } from "./config.js";
-import { normalizeSettings } from "./policy.js";
+import { groupPolicyIssues, normalizeSettings, policyFor } from "./policy.js";
 import { ToolPolicyRuntime } from "./runtime.js";
 import { buildSnapshot } from "./snapshot.js";
 import { DISCOVERY_TOOL_NAME, PTC_TRANSPORT_NAME } from "./types.js";
@@ -16,6 +16,7 @@ import {
   generateGroupSuggestion,
   MAX_AUTO_GROUP_TOOLS,
   normalizeGroupNames,
+  validateGenerationTimeout,
   selectSuggestionTools,
 } from "./suggest.js";
 
@@ -95,7 +96,10 @@ export function apply(ctx: unknown): void {
             .filter((schema) => schema.name !== DISCOVERY_TOOL_NAME && schema.name !== PTC_TRANSPORT_NAME);
           const selected = selectSuggestionTools(schemas, body?.toolNames);
           const otherGroupNames = normalizeGroupNames(body?.otherGroupNames);
-          return generateGroupSuggestion(llm, defaultModel, { tools: selected, otherGroupNames });
+          const timeoutMs = body?.timeoutMs === undefined
+            ? undefined
+            : validateGenerationTimeout(body.timeoutMs);
+          return generateGroupSuggestion(llm, defaultModel, { tools: selected, otherGroupNames }, timeoutMs);
         })().then(
           (suggestion) => sendJson(res, 200, suggestion),
           (error) => sendJson(res, 400, { ok: false, message: errorMessage(error) }),
@@ -127,7 +131,10 @@ export function apply(ctx: unknown): void {
             .filter((schema) => schema.name !== DISCOVERY_TOOL_NAME && schema.name !== PTC_TRANSPORT_NAME);
           const selected = selectSuggestionTools(schemas, body?.toolNames, MAX_AUTO_GROUP_TOOLS);
           const otherGroupNames = normalizeGroupNames(body?.otherGroupNames);
-          return generateAutoGroups(llm, defaultModel, { tools: selected, otherGroupNames });
+          const timeoutMs = body?.timeoutMs === undefined
+            ? undefined
+            : validateGenerationTimeout(body.timeoutMs);
+          return generateAutoGroups(llm, defaultModel, { tools: selected, otherGroupNames }, timeoutMs);
         })().then(
           (result) => sendJson(res, 200, result),
           (error) => sendJson(res, 400, { ok: false, message: errorMessage(error) }),
@@ -149,6 +156,7 @@ export function apply(ctx: unknown): void {
             ? body.expectedRevision
             : undefined;
           const next = normalizeSettings(body?.settings);
+          await assertNoEmptyGroups(presets, tools, next);
           await config.replace(next, expectedRevision);
           runtime.update(config.get());
           return buildSnapshot(presets, tools, config.get(), config.revision, config.path);
@@ -161,6 +169,45 @@ export function apply(ctx: unknown): void {
   });
 
   context.effect?.(() => () => runtime.dispose(), "dsh-tool-manager runtime");
+}
+
+export async function assertNoEmptyGroups(
+  presets: AgentPresetsLike,
+  tools: ToolRuntimeLike,
+  settings: ReturnType<typeof normalizeSettings>,
+): Promise<void> {
+  const inventory = await presets.compositionInventory();
+  const inspectable = new Map(inventory.map((item) => [item.id, item]));
+  for (const [presetId, policy] of Object.entries(settings.presets)) {
+    if (policy.groups.length === 0) continue;
+    const composition = inspectable.get(presetId);
+    if (!composition || composition.broken) continue;
+    let names: string[];
+    try {
+      const key = await presets.standingKeyFor(presetId);
+      names = tools.schemas(key).map((schema) => schema.name);
+    } catch {
+      continue;
+    }
+    const issues = groupPolicyIssues(policyFor(settings, presetId), names);
+    if (issues.disabledMembers.length > 0) {
+      const issue = issues.disabledMembers[0]!;
+      throw new Error(
+        `Preset ${JSON.stringify(presetId)} has disabled tool ${JSON.stringify(issue.tool)} in group ${JSON.stringify(issue.groups[0])}. Disabled tools cannot belong to on-demand groups.`,
+      );
+    }
+    if (issues.duplicateMembers.length > 0) {
+      const issue = issues.duplicateMembers[0]!;
+      throw new Error(
+        `Preset ${JSON.stringify(presetId)} assigns tool ${JSON.stringify(issue.tool)} to multiple groups: ${issue.groups.map((name) => JSON.stringify(name)).join(", ")}. Each tool may belong to only one group.`,
+      );
+    }
+    if (issues.emptyGroups.length > 0) {
+      throw new Error(
+        `Preset ${JSON.stringify(presetId)} has empty tool groups: ${issues.emptyGroups.map((name) => JSON.stringify(name)).join(", ")}. Each group must contain at least one available tool.`,
+      );
+    }
+  }
 }
 
 async function readJsonBody(req: HttpRequest): Promise<unknown> {

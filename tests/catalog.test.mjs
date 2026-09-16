@@ -14,38 +14,56 @@ import {
 } from "../dist/catalog.js";
 
 const groups = [
-  { name: "GitHub MCP", description: "GitHub tools" },
-  { name: "搜索工具" },
+  { name: "GitHub MCP", description: "GitHub tools", tools: ["mcp__github__issue", "mcp__github__pull"] },
+  { name: "搜索工具", tools: ["web_search"] },
 ];
 
 describe("tool-manager catalog", () => {
   it("projects group names and empty descriptions", () => {
     assert.deepEqual(catalogEntriesFromGroups(groups), [
-      { name: "GitHub MCP", description: "GitHub tools" },
-      { name: "搜索工具", description: "" },
+      {
+        name: "GitHub MCP",
+        description: "GitHub tools",
+        tools: ["mcp__github__issue", "mcp__github__pull"],
+      },
+      { name: "搜索工具", description: "", tools: ["web_search"] },
     ]);
+    assert.deepEqual(catalogEntriesFromGroups([
+      ...groups,
+      { name: "空组", description: "ignored", tools: [] },
+    ]).map((entry) => entry.name), ["GitHub MCP", "搜索工具"]);
   });
 
   it("digests entries, not framing prose", () => {
     const entries = catalogEntriesFromGroups(groups);
     const expected = createHash("sha256")
-      .update(entries.map((entry) => JSON.stringify([entry.name, entry.description])).join("\n"))
+      .update(entries.map((entry) => JSON.stringify([entry.name, entry.description, entry.tools])).join("\n"))
       .digest("hex");
     assert.equal(digestCatalogEntries(entries), expected);
     assert.equal(digestCatalogEntries(entries), digestCatalogEntries([...entries]));
     assert.notEqual(
       digestCatalogEntries(entries),
-      digestCatalogEntries([{ name: "GitHub MCP", description: "other" }]),
+      digestCatalogEntries([{ name: "GitHub MCP", description: "other", tools: ["mcp__github__issue"] }]),
+    );
+    assert.notEqual(
+      digestCatalogEntries(entries),
+      digestCatalogEntries(entries.map((entry, index) => index === 0
+        ? { ...entry, tools: [...entry.tools, "mcp__github__repo"] }
+        : entry)),
     );
   });
 
   it("renders a first-publish reminder with group names", () => {
     const text = renderCatalogText(catalogEntriesFromGroups(groups), false);
     assert.match(text, /^<system-reminder>\n/);
+    assert.match(text, /Some tools are organized into on-demand groups and can be opened when needed\./);
+    assert.doesNotMatch(text, /not in the current tool list/);
     assert.match(text, /<available_tool_groups>/);
-    assert.match(text, /- GitHub MCP: GitHub tools/);
-    assert.match(text, /- 搜索工具\n/);
+    assert.match(text, /- GitHub MCP \(2 tools\): GitHub tools/);
+    assert.match(text, /Tools: mcp__github__issue, mcp__github__pull/);
+    assert.match(text, /- 搜索工具 \(1 tools\)\n  Tools: web_search/);
     assert.match(text, /tool_list\(\{ group: "<name>" \}\)/);
+    assert.doesNotMatch(text, /PTC/);
     assert.doesNotMatch(text, /replaces every earlier/);
   });
 
@@ -53,14 +71,20 @@ describe("tool-manager catalog", () => {
     const update = renderCatalogText(catalogEntriesFromGroups(groups), true);
     assert.match(update, /replaces every earlier tool-group list/);
     assert.match(update, /Use only names in this replacement catalog/);
+    assert.doesNotMatch(update, /PTC/);
     const empty = renderCatalogText([], true);
     assert.match(empty, /No on-demand tool groups are currently available/);
     assert.doesNotMatch(empty, /Use only names in this replacement catalog/);
   });
 
-  it("escapes group names and descriptions in the model-facing frame", () => {
-    const text = renderCatalogText([{ name: "A<B>", description: "x&y" }], false);
-    assert.match(text, /- A&lt;B&gt;: x&amp;y/);
+  it("escapes group names, descriptions, and tool names in the model-facing frame", () => {
+    const text = renderCatalogText([{
+      name: "A<B>",
+      description: "x&y",
+      tools: ["tool<a>", "tool&b"],
+    }], false);
+    assert.match(text, /- A&lt;B&gt; \(2 tools\): x&amp;y/);
+    assert.match(text, /Tools: tool&lt;a&gt;, tool&amp;b/);
     assert.doesNotMatch(text, /A<B>/);
   });
 
@@ -81,10 +105,15 @@ describe("tool-manager catalog", () => {
   });
 
   it("reads only well-formed catalog sources", () => {
-    const entries = [{ name: "GitHub MCP", description: "GitHub tools" }];
+    const entries = [{ name: "GitHub MCP", description: "GitHub tools", tools: ["mcp__github__issue"] }];
     assert.deepEqual(readCatalogEntries({ kind: CATALOG_SOURCE_KIND, entries }), entries);
+    assert.deepEqual(
+      readCatalogEntries({ kind: CATALOG_SOURCE_KIND, entries: [{ name: "old", description: "legacy" }] }),
+      [{ name: "old", description: "legacy", tools: [] }],
+    );
     assert.equal(readCatalogEntries({ kind: "skill-catalog", entries }), undefined);
     assert.equal(readCatalogEntries({ kind: CATALOG_SOURCE_KIND, entries: [{ name: "x" }] }), undefined);
+    assert.equal(readCatalogEntries({ kind: CATALOG_SOURCE_KIND, entries: [{ name: "x", description: "", tools: [1] }] }), undefined);
     assert.equal(readCatalogEntries({ kind: CATALOG_SOURCE_KIND, entries: "nope" }), undefined);
   });
 
@@ -112,7 +141,7 @@ describe("tool-manager catalog", () => {
               type: "user/message",
               seq: 1,
               data: {
-                source: { kind: CATALOG_SOURCE_KIND, entries: [{ name: "old", description: "" }] },
+                source: { kind: CATALOG_SOURCE_KIND, entries: [{ name: "old", description: "", tools: ["old_tool"] }] },
               },
             };
           }
@@ -155,7 +184,7 @@ describe("tool-manager catalog", () => {
   });
 
   it("replaces an in-step catalog and retires names when groups disappear", () => {
-    const existing = renderCatalogMessage([{ name: "old", description: "" }], false);
+    const existing = renderCatalogMessage([{ name: "old", description: "", tools: ["old_tool"] }], false);
     const replaced = applyCatalogDecision(
       { kind: "enter", messages: [existing] },
       catalogEntriesFromGroups(groups),

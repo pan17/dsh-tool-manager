@@ -7,6 +7,7 @@ export const CATALOG_SOURCE_KIND = "tool-manager-catalog";
 export interface CatalogEntry {
   name: string;
   description: string;
+  tools: string[];
 }
 
 export interface CatalogHistory {
@@ -33,17 +34,20 @@ export interface EnterDecision {
 }
 
 export function catalogEntriesFromGroups(
-  groups: ReadonlyArray<{ name: string; description?: string }>,
+  groups: ReadonlyArray<{ name: string; description?: string; tools: readonly string[] }>,
 ): CatalogEntry[] {
-  return groups.map((group) => ({
-    name: group.name,
-    description: group.description ?? "",
-  }));
+  return groups
+    .filter((group) => group.tools.length > 0)
+    .map((group) => ({
+      name: group.name,
+      description: group.description ?? "",
+      tools: [...group.tools],
+    }));
 }
 
 export function digestCatalogEntries(entries: readonly CatalogEntry[]): string {
   const canonical = entries
-    .map((entry) => JSON.stringify([entry.name, entry.description]))
+    .map((entry) => JSON.stringify([entry.name, entry.description, entry.tools]))
     .join("\n");
   return createHash("sha256").update(canonical).digest("hex");
 }
@@ -57,7 +61,7 @@ export function renderCatalogText(entries: readonly CatalogEntry[], update: bool
   if (!update) {
     return [
       "<system-reminder>",
-      "Some tools are folded into on-demand groups and are not in the current tool list.",
+      "Some tools are organized into on-demand groups and can be opened when needed.",
       "",
       ...body,
       "",
@@ -94,7 +98,7 @@ export function renderCatalogMessage(
     source: {
       kind: CATALOG_SOURCE_KIND,
       form: "catalog",
-      entries: entries.map((entry) => ({ ...entry })),
+      entries: entries.map((entry) => ({ ...entry, tools: [...entry.tools] })),
       ...(update ? { update: true } : {}),
     },
   };
@@ -113,9 +117,16 @@ export function readCatalogEntries(source: unknown): CatalogEntry[] | undefined 
   const readable: CatalogEntry[] = [];
   for (const entry of record.entries) {
     if (entry === null || typeof entry !== "object") return undefined;
-    const { name, description } = entry as { name?: unknown; description?: unknown };
+    const { name, description, tools } = entry as {
+      name?: unknown;
+      description?: unknown;
+      tools?: unknown;
+    };
     if (typeof name !== "string" || name === "" || typeof description !== "string") return undefined;
-    readable.push({ name, description });
+    if (tools !== undefined && (!Array.isArray(tools) || tools.some((tool) => typeof tool !== "string"))) {
+      return undefined;
+    }
+    readable.push({ name, description, tools: tools === undefined ? [] : [...tools] });
   }
   return readable;
 }
@@ -184,7 +195,8 @@ export function applyCatalogDecision<T>(
 }
 
 function renderCatalogLine(entry: CatalogEntry): string {
-  return `- ${escapeText(entry.name)}${entry.description ? `: ${escapeText(entry.description)}` : ""}`;
+  const heading = `- ${escapeText(entry.name)} (${entry.tools.length} tools)${entry.description ? `: ${escapeText(entry.description)}` : ""}`;
+  return `${heading}\n  Tools: ${entry.tools.map(escapeText).join(", ")}`;
 }
 
 function escapeText(value: string): string {

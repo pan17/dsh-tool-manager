@@ -55,7 +55,7 @@ Agent loop 在 `preStep()` 中**先** `systemPrompt.assemble()`，**再**跑 `ag
 
 - **静态 preset 规则**可以放在 standing scope；
 - **按会话临时曝光状态**必须放在 Agent 自己的 scope；
-- 本设计为每个 live Agent 注册一个 scope-local `tool_list` 并维护该会话的打开状态，避免同 Preset 会话互相解锁。
+- `tool_list` 注册在 host 全局层（否则 PTC 生成 SDK 看不到），每个 live Agent 只维护该会话的打开状态，避免同 Preset 会话互相解锁。
 
 ### 2.5 Preset inventory 已有只读基础，但没有写 API
 
@@ -79,7 +79,7 @@ Web Settings page ─────▶│ tool-manager.json        │
 │ standing scope    │       │ one state per Agent    │
 └────────┬─────────┘       └───────┬───────────────┘
          │ inherited tools          │ agent.ctx.tools.restrict()
-         ▼                          │ + scope-local tool_list
+         ▼                          │ + global tool_list
 ┌──────────────────┐                ▼
 │ ToolRuntime       │◀──────── per-step visibility
 │ native/plugin/MCP │
@@ -111,14 +111,19 @@ interface ToolManagerSettings {
 4. `tool_list(group)` 打开该组（当前会话一直可用）；
 5. 原始 Preset 工具目录。
 
-显式 disabled 永远不能被临时曝光反向开启。`tool_list` 与 PTC 的 `run_code` 永远不会进入 deny 集合。
+显式 disabled 永远不能被临时曝光反向开启。PTC 的 `run_code` 永远不会进入 deny 集合。`tool_list` 注册在 host 全局层；没有按需组的 Preset 会把它 deny 掉。
 
 ### 3.3 `tool_list` 语义
 
 - `tool_list({ group: "GitHub MCP" })`：按名称打开该组，该组全部工具立刻可用，直到当前 Agent 结束或该组被删掉；
 - 每个 Agent 独立维护打开状态，不跨会话共享；
-- 仅当该 Preset 至少有一个按需组时才注册 `tool_list`；
-- 按需组说明不走 `systemPrompt.section`。所有 Preset（含极简模式的 `complete: true` persona）都在 `agent/pre-step` 写入一条 skill 式的持久 user 角色 `<system-reminder>` 目录。
+- `tool_list` 注册在 host 全局层，这样 PTC 生成 SDK 能绑定它；没有按需组的 Preset 用 restriction 隐藏；
+- PTC 模式应在 `run_code` 内调用 `await tools.tool_list({ group })`；
+- 按需组说明不走 `systemPrompt.section`。所有 Preset（含极简模式的 `complete: true` persona）都在 `agent/pre-step` 写入一条 skill 式的持久 user 角色 `<system-reminder>` 目录；目录为每组列出实际工具数量和完整工具名；
+- 只有至少匹配一个当前真实且未被显式关闭工具的组才是有效组。空组或仅含关闭工具的组不进入目录、不能通过 `tool_list` 打开，且当某 Preset 没有有效组时会隐藏 `tool_list`；
+- 工具状态互斥：一个工具只能是常开、已关闭，或属于一个按需组。WebUI 不提供已关闭或被其他组占用的工具；Host 保存接口拒绝关闭工具入组和跨组重复；
+- 旧 wildcard 配置在编辑时投影为当前实际成员的精确工具名。运行时对尚未修复的重叠配置按组顺序 first-match，确保目录中一个工具最多出现一次；
+- WebUI 和 Host 保存接口都禁止保存空组。旧配置中的空组或冲突组仍会在设置页中标为无效，供用户修复或删除。
 
 ## 4. 关键实现陷阱
 
@@ -141,20 +146,21 @@ interface ToolManagerSettings {
 
 它会拒绝 unknown、scope-local 和 reserved transport 名。实现必须：
 
-- 在注册 scope-local `tool_list` 之前 snapshot inherited baseline，并排除 `tool_list` / `run_code`；
+- 在 host/global 层注册 `tool_list`（与 `skill` 一样进入 PTC SDK 的继承面），再 snapshot inherited baseline，并排除 `tool_list` / `run_code`；
+- 没有按需组的 Preset 用 `restrict({ deny: ['tool_list'] })` 隐藏它，避免无关会话看到空的 discovery 工具；
 - 只对 baseline 中真实存在的名字构造 deny；
 - 监听 `tools/change`：先暂时卸下 restriction 再重读 baseline，避免把已隐藏的工具当成“已消失”；刷新期间抑制重入，防止自己的 restrict/register 再次触发刷新；
 - 若仍撞上 unknown-name 错误，从诊断文本解析 `known global tools` 后重试交集。
 
 ### 4.4 PTC 模式需单独定义产品语义
 
-PTC 模式模型表面只见 `run_code`，但生成 SDK 仍包含所有可见 end-capability tools。restriction 仍有效，也会缩小 SDK；`tool_list` 会作为 SDK binding 而非独立 native schema 出现。若希望 PTC 模式也只保留一个原生 discovery tool，需要 DSH 为 mixed presentation 提供更细粒度机制。MVP 保持 registry 原生语义。
+PTC 模式模型表面只见 `run_code`，但生成 SDK 仍包含所有可见 end-capability tools。restriction 仍有效，也会缩小 SDK。`tool_list` 必须注册在 host/global 层，才能进入 PTC 的继承面并成为 SDK binding；按 Agent 的 scope-local 注册对 `schemas(agent)` 可见，但不会稳定出现在 PTC 系统提示的 SDK 里。模型应在 `run_code` 内调用 `await tools.tool_list({ group })`。若希望 PTC 模式也把 `tool_list` 作为原生 discovery tool 与 `run_code` 并列，需要 DSH 为 mixed presentation 提供更细粒度机制。
 
 ### 4.5 Prompt guidance 可能残留
 
 DSH 内置文件/Web 等工具 guidance 会通过 `ctx.tools.get(name, scope)` 判断可见性，所以 restriction 后说明会消失。第三方插件若无条件注册 guidance，schema 虽隐藏但文字可能仍占上下文；平台层可未来引入“tool-owned guidance metadata”，或要求第三方遵循条件渲染约定。
 
-极简模式 persona 配了 `complete: true`：`assemble()` 的 waterfall 仍会跑，但随后把 complete 段恢复成唯一系统提示，其它 `systemPrompt.section` 全部丢掉。本插件因此不往系统提示里写组名单，而是对齐 `dsh-tool-skill`：在 `agent/pre-step` 追加一条 `source.kind = tool-manager-catalog` 的持久 user 消息。digest 按组名+描述计算；可见目录未变则不重发；组被删光且曾经发过则追加清空目录。`tool_list` 的 description 仍带上当前组名，作为 schema 兜底。
+极简模式 persona 配了 `complete: true`：`assemble()` 的 waterfall 仍会跑，但随后把 complete 段恢复成唯一系统提示，其它 `systemPrompt.section` 全部丢掉。本插件因此不往系统提示里写组名单，而是对齐 `dsh-tool-skill`：在 `agent/pre-step` 追加一条 `source.kind = tool-manager-catalog` 的持久 user 消息。每条 entry 保存组名、描述和实际工具名；digest 也覆盖这三项，因此成员变化会触发替换目录。可见目录未变则不重发；有效组被删光或变空且曾经发过则追加清空目录。`tool_list` 是全局一份 schema，description 不带组名；当前会话可用的组名和成员只出现在这条 catalog 里。旧消息缺少工具名字段时按空列表读取，以兼容升级前会话历史。
 
 ## 5. WebUI 与持久化选择
 
@@ -216,9 +222,10 @@ DSH 内置文件/Web 等工具 guidance 会通过 `ctx.tools.get(name, scope)` �
 已补强：
 
 1. 监听 `tools/change`，MCP 动态 tools/list 或插件 HMR 后刷新每个 Agent baseline；
-2. 设置页提示并一键清除 orphan disable；空组在草稿中即时可见；
+2. 设置页提示并一键清除 orphan disable；旧配置中的空组在草稿中标记为无效，必须补选工具或删除后才能保存；
 3. `tool_list` 支持 `query`，大组只返回 preview + 截断列表；
-4. 打开后的组在当前会话一直可用；策略更新不取消正在执行的工具。
+4. 打开后的组在当前会话一直可用；策略更新不取消正在执行的工具；
+5. 自动命名和自动分组在执行前显示确认框，并允许配置 5–600 秒请求超时（默认 60/120 秒）；Host 校验范围，超时及供应商中止会返回明确错误。
 
 仍待：
 

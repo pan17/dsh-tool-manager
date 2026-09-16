@@ -66,8 +66,59 @@ export function resolveGroups(
     name: group.name,
     ...(group.description ? { description: group.description } : {}),
     patterns: [...group.patterns],
-    tools: toolNames.filter((name) => matchesAnyPattern(name, group.patterns)),
+    tools: toolNames.filter((name) => isGroupableTool(name) && matchesAnyPattern(name, group.patterns)),
   }));
+}
+
+export interface GroupConflict {
+  tool: string;
+  groups: string[];
+}
+
+export interface GroupPolicyIssues {
+  emptyGroups: string[];
+  disabledMembers: GroupConflict[];
+  duplicateMembers: GroupConflict[];
+}
+
+export function resolveActiveGroups(
+  policy: PresetToolPolicy,
+  toolNames: readonly string[],
+): ResolvedGroupView[] {
+  const disabled = new Set(policy.disabled);
+  const claimed = new Set<string>();
+  const active: ResolvedGroupView[] = [];
+  for (const group of resolveGroups(policy, toolNames)) {
+    const tools = group.tools.filter((name) => !disabled.has(name) && !claimed.has(name));
+    if (tools.length === 0) continue;
+    for (const name of tools) claimed.add(name);
+    active.push({ ...group, tools });
+  }
+  return active;
+}
+
+export function groupPolicyIssues(
+  policy: PresetToolPolicy,
+  toolNames: readonly string[],
+): GroupPolicyIssues {
+  const disabled = new Set(policy.disabled);
+  const owners = new Map<string, string[]>();
+  const emptyGroups: string[] = [];
+  const disabledMembers: GroupConflict[] = [];
+  for (const group of resolveGroups(policy, toolNames)) {
+    const enabled = group.tools.filter((name) => !disabled.has(name));
+    if (enabled.length === 0) emptyGroups.push(group.name);
+    for (const name of group.tools) {
+      if (disabled.has(name)) disabledMembers.push({ tool: name, groups: [group.name] });
+      const groups = owners.get(name) ?? [];
+      groups.push(group.name);
+      owners.set(name, groups);
+    }
+  }
+  const duplicateMembers = [...owners]
+    .filter(([, groups]) => groups.length > 1)
+    .map(([tool, groups]) => ({ tool, groups }));
+  return { emptyGroups, disabledMembers, duplicateMembers };
 }
 
 export function hiddenTools(
@@ -87,14 +138,16 @@ export function hiddenTools(
 /**
  * Names `tools.restrict({ deny })` may legally receive for the current
  * inherited baseline: grouped tools that are not currently exposed, plus
- * every explicit disable. Discovery and the PTC transport are never denied.
+ * every explicit disable. The PTC transport is never denied. `tool_list` is
+ * registered globally so PTC's SDK can bind it. Presets with no active
+ * (non-empty) on-demand groups hide it here so restrict() can deny the inherited name.
  */
 export function denyNames(
   policy: PresetToolPolicy,
   toolNames: readonly string[],
   exposures: ReadonlySet<string>,
 ): string[] {
-  const groups = resolveGroups(policy, toolNames);
+  const groups = resolveActiveGroups(policy, toolNames);
   const hidden = new Set<string>();
   const open = new Set([...exposures].map((name) => name.toLowerCase()));
 
@@ -106,9 +159,17 @@ export function denyNames(
     if (toolNames.includes(name)) hidden.add(name);
   }
 
-  hidden.delete(DISCOVERY_TOOL_NAME);
   hidden.delete(PTC_TRANSPORT_NAME);
+  if (groups.length > 0) hidden.delete(DISCOVERY_TOOL_NAME);
+  else if (toolNames.includes(DISCOVERY_TOOL_NAME)) hidden.add(DISCOVERY_TOOL_NAME);
   return toolNames.filter((name) => hidden.has(name));
+}
+
+export function emptyGroupNames(
+  policy: PresetToolPolicy,
+  toolNames: readonly string[],
+): string[] {
+  return groupPolicyIssues(policy, toolNames).emptyGroups;
 }
 
 export function policyOrphans(
@@ -118,9 +179,7 @@ export function policyOrphans(
   const present = new Set(toolNames);
   return {
     disabled: policy.disabled.filter((name) => !present.has(name)),
-    emptyGroups: resolveGroups(policy, toolNames)
-      .filter((group) => group.tools.length === 0)
-      .map((group) => group.name),
+    emptyGroups: emptyGroupNames(policy, toolNames),
   };
 }
 
@@ -147,6 +206,10 @@ export function findGroup(
 
 export function matchesAnyPattern(value: string, patterns: readonly string[]): boolean {
   return patterns.some((pattern) => matchesPattern(value, pattern));
+}
+
+function isGroupableTool(name: string): boolean {
+  return name !== DISCOVERY_TOOL_NAME && name !== PTC_TRANSPORT_NAME;
 }
 
 export function matchesPattern(value: string, pattern: string): boolean {

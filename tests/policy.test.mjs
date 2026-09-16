@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   denyNames,
   findGroup,
+  groupPolicyIssues,
   hiddenTools,
   listGroupViews,
   matchesPattern,
@@ -10,6 +11,7 @@ import {
   normalizeSettings,
   parseKnownRestrictable,
   policyOrphans,
+  resolveActiveGroups,
   resolveGroups,
 } from "../dist/policy.js";
 
@@ -91,7 +93,20 @@ describe("tool-manager policy", () => {
     ]);
   });
 
-  it("keeps empty groups so checkbox drafts can be saved", () => {
+  it("hides globally registered tool_list when a preset has no active groups", () => {
+    assert.deepEqual(denyNames(
+      { disabled: [], groups: [] },
+      ["read", "tool_list", "write"],
+      new Set(),
+    ), ["tool_list"]);
+    assert.deepEqual(denyNames(
+      { disabled: [], groups: [{ name: "empty", patterns: ["gone"] }] },
+      ["read", "tool_list", "write"],
+      new Set(),
+    ), ["tool_list"]);
+  });
+
+  it("keeps empty groups visible as invalid configuration", () => {
     const policy = {
       disabled: ["gone", "read"],
       groups: [{ name: "mcp", patterns: [] }],
@@ -114,6 +129,49 @@ describe("tool-manager policy", () => {
     assert.equal(listed[0]?.name, "GitHub MCP");
     assert.equal(listed[0]?.description, "GitHub tools");
     assert.equal(listed[0]?.exposed, true);
+  });
+
+  it("resolves only non-empty active groups and excludes discovery transports", () => {
+    const policy = {
+      disabled: [],
+      groups: [
+        { name: "all", patterns: ["*"] },
+        { name: "empty", patterns: ["gone"] },
+      ],
+    };
+    assert.deepEqual(resolveActiveGroups(
+      policy,
+      ["read", "tool_list", "run_code"],
+    ).map((group) => ({ name: group.name, tools: group.tools })), [
+      { name: "all", tools: ["read"] },
+    ]);
+    assert.deepEqual(resolveActiveGroups(
+      { disabled: ["read"], groups: [{ name: "disabled only", patterns: ["read"] }] },
+      ["read", "tool_list"],
+    ), []);
+  });
+
+  it("assigns overlapping tools to the first group and reports policy conflicts", () => {
+    const policy = {
+      disabled: ["web_fetch"],
+      groups: [
+        { name: "Web", patterns: ["web_*"] },
+        { name: "Search", patterns: ["web_search"] },
+        { name: "Fetch", patterns: ["web_fetch"] },
+      ],
+    };
+    assert.deepEqual(resolveActiveGroups(policy, ["web_search", "web_fetch"])
+      .map((group) => ({ name: group.name, tools: group.tools })), [
+      { name: "Web", tools: ["web_search"] },
+    ]);
+    assert.deepEqual(groupPolicyIssues(policy, ["web_search", "web_fetch"]), {
+      emptyGroups: ["Fetch"],
+      disabledMembers: [{ tool: "web_fetch", groups: ["Web"] }, { tool: "web_fetch", groups: ["Fetch"] }],
+      duplicateMembers: [
+        { tool: "web_search", groups: ["Web", "Search"] },
+        { tool: "web_fetch", groups: ["Web", "Fetch"] },
+      ],
+    });
   });
 
   it("finds a group by name case-insensitively", () => {

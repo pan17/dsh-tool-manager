@@ -14,7 +14,10 @@ export const MAX_GROUP_DESCRIPTION_LENGTH = 240;
 const MAX_TOOL_NAME_LENGTH = 160;
 const MAX_TOOL_DESCRIPTION_LENGTH = 600;
 const MAX_MODEL_OUTPUT_LENGTH = 8_192;
-const SUGGESTION_TIMEOUT_MS = 30_000;
+export const DEFAULT_SUGGESTION_TIMEOUT_MS = 60_000;
+export const DEFAULT_AUTO_GROUP_TIMEOUT_MS = 120_000;
+export const MIN_GENERATION_TIMEOUT_MS = 5_000;
+export const MAX_GENERATION_TIMEOUT_MS = 600_000;
 
 export interface GroupSuggestion {
   name: string;
@@ -44,6 +47,7 @@ export async function generateGroupSuggestion(
   llm: LlmRuntimeLike,
   defaultModel: AgentDefaultModelLike,
   request: GroupSuggestionRequest,
+  timeoutMs = DEFAULT_SUGGESTION_TIMEOUT_MS,
 ): Promise<GroupSuggestion> {
   if (request.tools.length === 0) throw new Error("请至少选择一个工具后再生成");
   if (request.tools.length > MAX_SUGGESTION_TOOLS) {
@@ -51,8 +55,9 @@ export async function generateGroupSuggestion(
   }
 
   const selection = validateSelection(defaultModel.currentSelection());
+  const effectiveTimeoutMs = validateGenerationTimeout(timeoutMs);
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort("tool-manager group suggestion timed out"), SUGGESTION_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort("tool-manager group suggestion timed out"), effectiveTimeoutMs);
   try {
     const text = await collectModelText(llm, selection, buildSuggestionPrompt(request), controller.signal);
     const suggestion = parseGroupSuggestion(text);
@@ -61,6 +66,8 @@ export async function generateGroupSuggestion(
       throw new Error(`模型生成的名称“${suggestion.name}”与现有分组重复，请重试或手动修改`);
     }
     return suggestion;
+  } catch (error) {
+    throw generationError(error, controller.signal, "自动生成名称和描述", effectiveTimeoutMs);
   } finally {
     clearTimeout(timeout);
   }
@@ -100,14 +107,16 @@ export async function generateAutoGroups(
   llm: LlmRuntimeLike,
   defaultModel: AgentDefaultModelLike,
   request: AutoGroupRequest,
+  timeoutMs = DEFAULT_AUTO_GROUP_TIMEOUT_MS,
 ): Promise<AutoGroupResult> {
   if (request.tools.length === 0) throw new Error("当前没有可自动分组的工具");
   if (request.tools.length > MAX_AUTO_GROUP_TOOLS) {
     throw new Error(`自动分组一次最多处理 ${MAX_AUTO_GROUP_TOOLS} 个工具，请先手工缩小范围`);
   }
   const selection = validateSelection(defaultModel.currentSelection());
+  const effectiveTimeoutMs = validateGenerationTimeout(timeoutMs);
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort("tool-manager auto grouping timed out"), SUGGESTION_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort("tool-manager auto grouping timed out"), effectiveTimeoutMs);
   try {
     const text = await collectModelText(
       llm,
@@ -117,6 +126,8 @@ export async function generateAutoGroups(
       1_600,
     );
     return parseAutoGroupResult(text, request.tools.map((tool) => tool.name), request.otherGroupNames);
+  } catch (error) {
+    throw generationError(error, controller.signal, "自动分组", effectiveTimeoutMs);
   } finally {
     clearTimeout(timeout);
   }
@@ -284,6 +295,33 @@ async function collectModelText(
   }
   const source = blocks.size > 0 ? blocks : deltas;
   return [...source.entries()].sort(([a], [b]) => a - b).map(([, text]) => text).join("");
+}
+
+export function validateGenerationTimeout(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || !Number.isInteger(value)) {
+    throw new Error("timeoutMs must be an integer number of milliseconds");
+  }
+  if (value < MIN_GENERATION_TIMEOUT_MS || value > MAX_GENERATION_TIMEOUT_MS) {
+    throw new Error(
+      `timeoutMs must be between ${MIN_GENERATION_TIMEOUT_MS} and ${MAX_GENERATION_TIMEOUT_MS} milliseconds`,
+    );
+  }
+  return value;
+}
+
+function generationError(
+  error: unknown,
+  signal: AbortSignal,
+  operation: string,
+  timeoutMs: number,
+): Error {
+  if (signal.aborted) {
+    return new Error(`${operation}等待模型响应超过 ${Math.round(timeoutMs / 1_000)} 秒，请重试或增加超时时间。`);
+  }
+  if (error instanceof Error && (error.name === "AbortError" || /operation was aborted/i.test(error.message))) {
+    return new Error(`${operation}被模型服务中止，请重试。`);
+  }
+  return error instanceof Error ? error : new Error(String(error));
 }
 
 function validateSelection(selection: ModelSelectionLike | undefined): ModelSelectionLike {

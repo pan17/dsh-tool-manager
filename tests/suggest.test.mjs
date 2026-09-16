@@ -9,6 +9,7 @@ import {
   parseAutoGroupResult,
   parseGroupSuggestion,
   selectSuggestionTools,
+  validateGenerationTimeout,
 } from "../dist/suggest.js";
 
 const tools = [
@@ -147,6 +148,44 @@ describe("tool-manager group suggestions", () => {
     assert.equal(result.groups[0].name, "网页研究");
     assert.deepEqual(result.ungrouped, ["read"]);
     assert.equal(options.maxTokens, 1600);
+  });
+
+  it("validates configurable generation timeouts", () => {
+    assert.equal(validateGenerationTimeout(5_000), 5_000);
+    assert.equal(validateGenerationTimeout(600_000), 600_000);
+    assert.throws(() => validateGenerationTimeout(4_999), /between 5000 and 600000/);
+    assert.throws(() => validateGenerationTimeout(600_001), /between 5000 and 600000/);
+    assert.throws(() => validateGenerationTimeout(30.5), /integer/);
+  });
+
+  it("reports local and provider aborts clearly", async () => {
+    const delayed = {
+      async *stream(options) {
+        await new Promise((resolve, reject) => {
+          const timer = setTimeout(resolve, 100);
+          options.signal.addEventListener("abort", () => {
+            clearTimeout(timer);
+            const error = new Error("This operation was aborted");
+            error.name = "AbortError";
+            reject(error);
+          }, { once: true });
+        });
+      },
+    };
+    await assert.rejects(() => generateGroupSuggestion(delayed, {
+      currentSelection: () => ({ provider: "p", model: "m" }),
+    }, { tools: [tools[0]], otherGroupNames: [] }, 5), /between 5000 and 600000/);
+
+    const providerAbort = {
+      async *stream() {
+        const error = new Error("This operation was aborted");
+        error.name = "AbortError";
+        throw error;
+      },
+    };
+    await assert.rejects(() => generateGroupSuggestion(providerAbort, {
+      currentSelection: () => ({ provider: "p", model: "m" }),
+    }, { tools: [tools[0]], otherGroupNames: [] }, 5_000), /被模型服务中止/);
   });
 
   it("requires a configured default model", async () => {
