@@ -81,6 +81,14 @@ window.__ModuleLoader__.load({
 				})),
 			};
 		}
+		function settingsPayload(value) {
+			const settings = { presets: {} };
+			for (const item of value && value.presets || []) settings.presets[item.id] = policyPayload(item.policy);
+			return settings;
+		}
+		function settingsSignature(value) {
+			return JSON.stringify(settingsPayload(value));
+		}
 		function matchesPattern(value, pattern) {
 			if (!pattern.includes("*")) return value === pattern;
 			const escaped = pattern.replace(/[|\\{}()[\]^$+?.]/g, "\\$&").replace(/\*/g, ".*");
@@ -144,6 +152,16 @@ window.__ModuleLoader__.load({
 				}).catch((e) => setError(String(e.message || e))).finally(() => setBusy(false));
 			}, []);
 			react.useEffect(() => { load(); }, [load]);
+			const dirty = !!(snapshot && draft && settingsSignature(snapshot) !== settingsSignature(draft));
+			react.useEffect(() => {
+				if (!dirty) return undefined;
+				function onBeforeUnload(event) {
+					event.preventDefault();
+					event.returnValue = "";
+				}
+				window.addEventListener("beforeunload", onBeforeUnload);
+				return () => window.removeEventListener("beforeunload", onBeforeUnload);
+			}, [dirty]);
 			react.useEffect(() => {
 				if (!modal) return undefined;
 				function onKeyDown(event) {
@@ -263,10 +281,7 @@ window.__ModuleLoader__.load({
 					group.patterns = patterns;
 				});
 				setModal(null);
-				if (created) {
-					setFilter("cold");
-					setExpanded((current) => ({ ...current, [key]: true }));
-				}
+				if (created) setExpanded((current) => ({ ...current, [key]: true }));
 			}
 
 			function autoGroupSignature(toolNames) {
@@ -321,13 +336,17 @@ window.__ModuleLoader__.load({
 					for (const key of addedKeys) next[key] = true;
 					return next;
 				});
-				setFilter("cold"); setQuery(""); setAutoPreview(null); setAutoGroupError("");
+				setAutoPreview(null); setAutoGroupError("");
 				setMessage("自动分组已加入草稿；检查后请点击保存。");
 			}
 
+			function reload() {
+				if (dirty && !window.confirm("当前有未保存的修改，刷新会丢弃这些修改。确定继续吗？")) return;
+				load();
+			}
+
 			function save() {
-				const settings = { presets: {} };
-				for (const item of draft.presets) settings.presets[item.id] = policyPayload(item.policy);
+				const settings = settingsPayload(draft);
 				setBusy(true); setError(""); setMessage("");
 				api("/save", { method: "POST", body: JSON.stringify({ expectedRevision: snapshot.revision, settings }) })
 					.then((value) => {
@@ -488,10 +507,11 @@ window.__ModuleLoader__.load({
 				h("div", { className: "tm_head" },
 					h("div", null, h("h2", null, "Agent 工具管理"), h("div", { className: "tm_muted" }, "按每个 Agent 预设开关工具。点「分组」把不常用的收进按需组：平时模型看不到，需要时先查目录再打开。")),
 					h("div", { className: "tm_row" },
-						h("button", { className: "tm_btn", onClick: load, disabled: busy || autoGrouping }, "刷新"),
-						h("button", { className: "tm_btn primary", onClick: save, disabled: busy || autoGrouping || !draft.writable }, busy ? "处理中…" : "保存"),
+						h("button", { className: "tm_btn", onClick: reload, disabled: busy || autoGrouping }, "刷新"),
+						h("button", { className: "tm_btn primary", onClick: save, disabled: busy || autoGrouping || !draft.writable || !dirty }, busy ? "处理中…" : "保存"),
 					),
 				),
+				dirty ? h("div", { className: "tm_notice", role: "status" }, "有未保存的修改。请点击保存；刷新或离开页面前系统会提醒你。") : null,
 				!draft.writable ? h("div", { className: "tm_notice" }, "当前配置文件不可写，不能保存。") : null,
 				error ? h("div", { className: "tm_error" }, error) : null,
 				message ? h("div", { className: "tm_notice" }, message) : null,
