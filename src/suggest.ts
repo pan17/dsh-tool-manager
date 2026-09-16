@@ -6,15 +6,6 @@ import type {
   ToolSchemaLike,
 } from "./dsh.js";
 
-export const MAX_SUGGESTION_TOOLS = 64;
-export const MAX_CUSTOM_PROMPT_LENGTH = 32_000;
-export const MAX_AUTO_GROUP_TOOLS = 120;
-export const MAX_AUTO_GROUPS = 32;
-export const MAX_GROUP_NAME_LENGTH = 40;
-export const MAX_GROUP_DESCRIPTION_LENGTH = 240;
-const MAX_TOOL_NAME_LENGTH = 160;
-const MAX_TOOL_DESCRIPTION_LENGTH = 600;
-const MAX_MODEL_OUTPUT_LENGTH = 8_192;
 export const DEFAULT_SUGGESTION_TIMEOUT_MS = 60_000;
 export const DEFAULT_AUTO_GROUP_TIMEOUT_MS = 120_000;
 export const MIN_GENERATION_TIMEOUT_MS = 5_000;
@@ -53,9 +44,6 @@ export async function generateGroupSuggestion(
   timeoutMs = DEFAULT_SUGGESTION_TIMEOUT_MS,
 ): Promise<GroupSuggestion> {
   if (request.tools.length === 0) throw new Error("请至少选择一个工具后再生成");
-  if (request.tools.length > MAX_SUGGESTION_TOOLS) {
-    throw new Error(`一次最多根据 ${MAX_SUGGESTION_TOOLS} 个工具生成分组`);
-  }
 
   const customPrompt = normalizeCustomPrompt(request.prompt);
   const prompt = customPrompt ?? buildSuggestionPrompt(request);
@@ -81,7 +69,6 @@ export async function generateGroupSuggestion(
 export function selectSuggestionTools(
   schemas: ToolSchemaLike[],
   requestedNames: unknown,
-  limit = MAX_SUGGESTION_TOOLS,
 ): ToolSchemaLike[] {
   if (!Array.isArray(requestedNames)) throw new Error("toolNames must be an array");
   const names = [...new Set(requestedNames.map((value) => {
@@ -89,9 +76,6 @@ export function selectSuggestionTools(
     return value.trim();
   }))];
   if (names.length === 0) throw new Error("请至少选择一个工具后再生成");
-  if (names.length > limit) {
-    throw new Error(`一次最多根据 ${limit} 个工具生成分组`);
-  }
   const byName = new Map(schemas.map((schema) => [schema.name, schema]));
   const unknown = names.filter((name) => !byName.has(name));
   if (unknown.length > 0) throw new Error(`所选工具不存在或已变化：${unknown.join(", ")}`);
@@ -101,10 +85,9 @@ export function selectSuggestionTools(
 export function normalizeGroupNames(value: unknown): string[] {
   if (value === undefined) return [];
   if (!Array.isArray(value)) throw new Error("otherGroupNames must be an array");
-  if (value.length > 256) throw new Error("现有分组名称过多");
   return [...new Set(value.map((item) => {
     if (typeof item !== "string") throw new Error("otherGroupNames must contain strings");
-    return normalizeWhitespace(item).slice(0, MAX_GROUP_NAME_LENGTH);
+    return normalizeWhitespace(item);
   }).filter(Boolean))];
 }
 
@@ -112,11 +95,7 @@ export function normalizeCustomPrompt(prompt: unknown): string | undefined {
   if (prompt === undefined || prompt === null) return undefined;
   if (typeof prompt !== "string") throw new Error("prompt must be a string");
   const trimmed = prompt.trim();
-  if (!trimmed) return undefined;
-  if (trimmed.length > MAX_CUSTOM_PROMPT_LENGTH) {
-    throw new Error(`提示词过长（超过 ${MAX_CUSTOM_PROMPT_LENGTH} 个字符）`);
-  }
-  return trimmed;
+  return trimmed || undefined;
 }
 
 export async function generateAutoGroups(
@@ -126,9 +105,6 @@ export async function generateAutoGroups(
   timeoutMs = DEFAULT_AUTO_GROUP_TIMEOUT_MS,
 ): Promise<AutoGroupResult> {
   if (request.tools.length === 0) throw new Error("当前没有可自动分组的工具");
-  if (request.tools.length > MAX_AUTO_GROUP_TOOLS) {
-    throw new Error(`自动分组一次最多处理 ${MAX_AUTO_GROUP_TOOLS} 个工具，请先手工缩小范围`);
-  }
   const customPrompt = normalizeCustomPrompt(request.prompt);
   const prompt = customPrompt ?? buildAutoGroupPrompt(request);
   const selection = validateSelection(defaultModel.currentSelection());
@@ -136,13 +112,7 @@ export async function generateAutoGroups(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort("tool-manager auto grouping timed out"), effectiveTimeoutMs);
   try {
-    const text = await collectModelText(
-      llm,
-      selection,
-      prompt,
-      controller.signal,
-      1_600,
-    );
+    const text = await collectModelText(llm, selection, prompt, controller.signal);
     return parseAutoGroupResult(text, request.tools.map((tool) => tool.name), request.otherGroupNames);
   } catch (error) {
     throw generationError(error, controller.signal, "自动分组", effectiveTimeoutMs);
@@ -153,8 +123,8 @@ export async function generateAutoGroups(
 
 export function buildSuggestionPrompt(request: GroupSuggestionRequest): string {
   const tools = request.tools.map((tool) => ({
-    name: tool.name.slice(0, MAX_TOOL_NAME_LENGTH),
-    description: normalizeWhitespace(tool.description).slice(0, MAX_TOOL_DESCRIPTION_LENGTH),
+    name: tool.name,
+    description: normalizeWhitespace(tool.description),
   }));
   const forbidden = request.otherGroupNames.length > 0 ? request.otherGroupNames : ["（无）"];
   return [
@@ -163,8 +133,7 @@ export function buildSuggestionPrompt(request: GroupSuggestionRequest): string {
     "1. 名称使用简洁自然的中文，概括共同用途，建议 2 到 10 个汉字。",
     "2. 描述使用一句简洁中文，说明该组适合完成什么任务，不要逐个罗列工具。",
     `3. 名称不得与这些其他分组重名：${forbidden.join("、")}。`,
-    `4. 名称不超过 ${MAX_GROUP_NAME_LENGTH} 个字符，描述不超过 ${MAX_GROUP_DESCRIPTION_LENGTH} 个字符。`,
-    "5. 只输出一个 JSON 对象，不要输出 Markdown、解释或额外字段。格式：{\"name\":\"...\",\"description\":\"...\"}",
+    "4. 只输出一个 JSON 对象，不要输出 Markdown、解释或额外字段。格式：{\"name\":\"...\",\"description\":\"...\"}",
     "已选择工具：",
     JSON.stringify(tools, null, 2),
   ].join("\n");
@@ -172,8 +141,8 @@ export function buildSuggestionPrompt(request: GroupSuggestionRequest): string {
 
 export function buildAutoGroupPrompt(request: AutoGroupRequest): string {
   const tools = request.tools.map((tool) => ({
-    name: tool.name.slice(0, MAX_TOOL_NAME_LENGTH),
-    description: normalizeWhitespace(tool.description).slice(0, MAX_TOOL_DESCRIPTION_LENGTH),
+    name: tool.name,
+    description: normalizeWhitespace(tool.description),
   }));
   const forbidden = request.otherGroupNames.length > 0 ? request.otherGroupNames : ["（无）"];
   return [
@@ -184,8 +153,7 @@ export function buildAutoGroupPrompt(request: AutoGroupRequest): string {
     "3. 避免只有一个工具的碎片组，也避免含义模糊、规模过大的杂项组；组数由工具语义决定。",
     "4. 每组名称使用简洁自然的中文，建议 2 到 10 个汉字；描述用一句简洁中文概括用途。",
     `5. 新组名称互不重复，且不得与这些现有分组重名：${forbidden.join("、")}。`,
-    `6. 最多生成 ${MAX_AUTO_GROUPS} 个组；名称不超过 ${MAX_GROUP_NAME_LENGTH} 个字符，描述不超过 ${MAX_GROUP_DESCRIPTION_LENGTH} 个字符。`,
-    "7. 只输出一个 JSON 对象，不要输出 Markdown、解释或额外字段。",
+    "6. 只输出一个 JSON 对象，不要输出 Markdown、解释或额外字段。",
     "格式：{\"groups\":[{\"name\":\"...\",\"description\":\"...\",\"tools\":[\"exact_name\"]}],\"ungrouped\":[\"exact_name\"]}",
     "候选工具：",
     JSON.stringify(tools, null, 2),
@@ -199,7 +167,6 @@ export function parseAutoGroupResult(
 ): AutoGroupResult {
   const parsed = parseJsonRecord(output, "模型返回的自动分组结果");
   if (!Array.isArray(parsed.groups)) throw new Error("模型返回的自动分组结果缺少 groups 数组");
-  if (parsed.groups.length > MAX_AUTO_GROUPS) throw new Error(`模型生成的分组超过 ${MAX_AUTO_GROUPS} 个`);
   const candidates = new Set(candidateNames);
   const forbidden = new Set(otherGroupNames.map(normalizeComparableName));
   const groupNames = new Set<string>();
@@ -211,8 +178,6 @@ export function parseAutoGroupResult(
     const name = typeof record.name === "string" ? normalizeWhitespace(record.name) : "";
     const description = typeof record.description === "string" ? normalizeWhitespace(record.description) : "";
     if (!name || !description) throw new Error("模型返回了名称或描述为空的分组");
-    if (name.length > MAX_GROUP_NAME_LENGTH) throw new Error(`分组名称“${name}”过长`);
-    if (description.length > MAX_GROUP_DESCRIPTION_LENGTH) throw new Error(`分组“${name}”的描述过长`);
     const comparable = normalizeComparableName(name);
     if (forbidden.has(comparable)) throw new Error(`模型生成的名称“${name}”与现有分组重复`);
     if (groupNames.has(comparable)) throw new Error(`模型生成了重复的分组名称“${name}”`);
@@ -255,12 +220,6 @@ export function parseGroupSuggestion(output: string): GroupSuggestion {
   const name = typeof record.name === "string" ? normalizeWhitespace(record.name) : "";
   const description = typeof record.description === "string" ? normalizeWhitespace(record.description) : "";
   if (!name || !description) throw new Error("模型返回的名称或描述为空，请重试");
-  if (name.length > MAX_GROUP_NAME_LENGTH) {
-    throw new Error(`模型返回的名称超过 ${MAX_GROUP_NAME_LENGTH} 个字符，请重试`);
-  }
-  if (description.length > MAX_GROUP_DESCRIPTION_LENGTH) {
-    throw new Error(`模型返回的描述超过 ${MAX_GROUP_DESCRIPTION_LENGTH} 个字符，请重试`);
-  }
   return { name, description };
 }
 
@@ -269,7 +228,6 @@ async function collectModelText(
   selection: ModelSelectionLike,
   prompt: string,
   signal: AbortSignal,
-  maxTokens = 320,
 ): Promise<string> {
   const deltas = new Map<number, string>();
   const blocks = new Map<number, string>();
@@ -288,7 +246,6 @@ async function collectModelText(
     }],
     system: "你是工具目录编辑助手。严格按用户要求只返回 JSON。",
     temperature: 0.2,
-    maxTokens,
     signal,
   })) {
     if (chunk.type === "text-delta") {
@@ -303,8 +260,6 @@ async function collectModelText(
     } else if (chunk.type === "finish") {
       terminal = chunk;
     }
-    const size = [...deltas.values(), ...blocks.values()].reduce((sum, text) => sum + text.length, 0);
-    if (size > MAX_MODEL_OUTPUT_LENGTH) throw new Error("模型返回内容过长，请重试");
   }
   if (sawToolCall) throw new Error("模型返回了工具调用而不是分组建议，请重试");
   if (!terminal) throw new Error("模型响应未正常结束，请重试");

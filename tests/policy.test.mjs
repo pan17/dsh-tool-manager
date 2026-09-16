@@ -180,9 +180,11 @@ describe("tool-manager policy", () => {
     assert.equal(findGroup(groups, "other"), undefined);
   });
 
-  it("normalizes group names without ascii-slugifying", () => {
+  it("normalizes group names without truncating or ascii-slugifying", () => {
+    const longName = `搜索工具${"长".repeat(200)}`;
     assert.equal(normalizeGroupName(" GitHub MCP "), "GitHub MCP");
     assert.equal(normalizeGroupName("搜索工具"), "搜索工具");
+    assert.equal(normalizeGroupName(`  ${longName}  `), longName);
   });
 
   it("parses restrict() unknown-name diagnostics", () => {

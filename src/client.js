@@ -154,8 +154,8 @@ window.__ModuleLoader__.load({
 
 		function defaultAutoGroupPrompt(tools, otherGroupNames) {
 			const list = (tools || []).map((tool) => ({
-				name: String(tool.name || "").slice(0, 160),
-				description: String(tool.description || "").trim().replace(/\s+/g, " ").slice(0, 600),
+				name: String(tool.name || ""),
+				description: String(tool.description || "").trim().replace(/\s+/g, " "),
 			}));
 			const forbidden = (otherGroupNames && otherGroupNames.length > 0) ? otherGroupNames : ["（无）"];
 			return [
@@ -166,8 +166,7 @@ window.__ModuleLoader__.load({
 				"3. 避免只有一个工具的碎片组，也避免含义模糊、规模过大的杂项组；组数由工具语义决定。",
 				"4. 每组名称使用简洁自然的中文，建议 2 到 10 个汉字；描述用一句简洁中文概括用途。",
 				"5. 新组名称互不重复，且不得与这些现有分组重名：" + forbidden.join("、") + "。",
-				"6. 最多生成 32 个组；名称不超过 40 个字符，描述不超过 240 个字符。",
-				"7. 只输出一个 JSON 对象，不要输出 Markdown、解释或额外字段。",
+				"6. 只输出一个 JSON 对象，不要输出 Markdown、解释或额外字段。",
 				'格式：{"groups":[{"name":"...","description":"...","tools":["exact_name"]}],"ungrouped":["exact_name"]}',
 				"候选工具：",
 				JSON.stringify(list, null, 2),
@@ -176,8 +175,8 @@ window.__ModuleLoader__.load({
 
 		function defaultGroupSuggestionPrompt(tools, otherGroupNames) {
 			const list = (tools || []).map((tool) => ({
-				name: String(tool.name || "").slice(0, 160),
-				description: String(tool.description || "").trim().replace(/\s+/g, " ").slice(0, 600),
+				name: String(tool.name || ""),
+				description: String(tool.description || "").trim().replace(/\s+/g, " "),
 			}));
 			const forbidden = (otherGroupNames && otherGroupNames.length > 0) ? otherGroupNames : ["（无）"];
 			return [
@@ -186,8 +185,7 @@ window.__ModuleLoader__.load({
 				"1. 名称使用简洁自然的中文，概括共同用途，建议 2 到 10 个汉字。",
 				"2. 描述使用一句简洁中文，说明该组适合完成什么任务，不要逐个罗列工具。",
 				"3. 名称不得与这些其他分组重名：" + forbidden.join("、") + "。",
-				"4. 名称不超过 40 个字符，描述不超过 240 个字符。",
-				'5. 只输出一个 JSON 对象，不要输出 Markdown、解释或额外字段。格式：{"name":"...","description":"..."}',
+				'4. 只输出一个 JSON 对象，不要输出 Markdown、解释或额外字段。格式：{"name":"...","description":"..."}',
 				"已选择工具：",
 				JSON.stringify(list, null, 2),
 			].join("\n");
@@ -433,19 +431,9 @@ window.__ModuleLoader__.load({
 					patchAiConfirm({ error: "提示词不能为空，请输入有效提示词或点击重置为默认。" });
 					return;
 				}
-				if (prompt.length > 32000) {
-					patchAiConfirm({ error: "提示词不能超过 32000 个字符。" });
+				if (aiConfirm.kind === "auto-group" && selected.length === 0) {
+					patchAiConfirm({ error: "请至少勾选一个工具进行分组。" });
 					return;
-				}
-				if (aiConfirm.kind === "auto-group") {
-					if (selected.length === 0) {
-						patchAiConfirm({ error: "请至少勾选一个工具进行分组。" });
-						return;
-					}
-					if (selected.length > 120) {
-						patchAiConfirm({ error: "一次最多勾选 120 个工具进行分组。" });
-						return;
-					}
 				}
 				const run = aiConfirm.run;
 				setAiConfirm(null);
@@ -562,8 +550,7 @@ window.__ModuleLoader__.load({
 			const aiSelected = new Set(aiConfirm && aiConfirm.selected ? aiConfirm.selected : []);
 			const aiVisibleSelected = aiVisibleCandidates.filter((tool) => aiSelected.has(tool.name)).map((tool) => tool.name);
 			const aiPromptTrimmed = String(aiConfirm && aiConfirm.prompt || "").trim();
-			const aiPromptTooLong = String(aiConfirm && aiConfirm.prompt || "").length > 32000;
-			const aiCanConfirm = aiPromptTrimmed.length > 0 && !aiPromptTooLong && (!aiIsAutoGroup || (aiSelected.size > 0 && aiSelected.size <= 120));
+			const aiCanConfirm = aiPromptTrimmed.length > 0 && (!aiIsAutoGroup || aiSelected.size > 0);
 
 			function updateAutoGroupSelection(nextSelectedNames) {
 				const nextSelected = [...new Set(nextSelectedNames)];
@@ -646,9 +633,7 @@ window.__ModuleLoader__.load({
 								),
 								aiSelected.size === 0
 									? h("div", { className: "tm_error", key: "status" }, "请至少勾选一个工具进行分组。")
-									: (aiSelected.size > 120
-										? h("div", { className: "tm_error", key: "status" }, "自动分组一次最多处理 120 个工具，当前已勾选 " + aiSelected.size + " 个，请减少勾选。")
-										: h("div", { className: "tm_muted", key: "status" }, "已勾选 " + aiSelected.size + " / " + aiCandidates.length + " 个候选工具。自动分组会调用当前默认模型，结果仍可手动修改。")),
+									: h("div", { className: "tm_muted", key: "status" }, "已勾选 " + aiSelected.size + " / " + aiCandidates.length + " 个候选工具。自动分组会调用当前默认模型，结果仍可手动修改。"),
 								aiVisibleCandidates.length
 									? h("div", { className: "tm_picker", key: "picker" }, aiVisibleCandidates.map((tool) => h("label", { className: "tm_pick", key: tool.name },
 										h("input", {
@@ -748,8 +733,7 @@ window.__ModuleLoader__.load({
 										placeholder: "提示词内容...",
 										onChange: (e) => patchAiConfirm({ prompt: e.target.value, promptCustom: true, error: "" }),
 									}),
-									!aiPromptTrimmed ? h("div", { className: "tm_error", style: { marginTop: "6px" } }, "提示词不能为空，请输入有效提示词或点击重置为默认。")
-										: (aiPromptTooLong ? h("div", { className: "tm_error", style: { marginTop: "6px" } }, "提示词不能超过 32000 个字符，当前共 " + (aiConfirm.prompt || "").length + " 个字符。") : null),
+									!aiPromptTrimmed ? h("div", { className: "tm_error", style: { marginTop: "6px" } }, "提示词不能为空，请输入有效提示词或点击重置为默认。") : null,
 								) : null,
 							),
 							h("label", { className: "tm_timeout_field" },

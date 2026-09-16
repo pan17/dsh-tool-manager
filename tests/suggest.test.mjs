@@ -1,7 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  MAX_CUSTOM_PROMPT_LENGTH,
   buildAutoGroupPrompt,
   buildSuggestionPrompt,
   generateAutoGroups,
@@ -21,17 +20,30 @@ const tools = [
 ];
 
 describe("tool-manager group suggestions", () => {
-  it("selects only known requested tools in request order", () => {
+  it("selects all known requested tools in request order without a count limit", () => {
     assert.deepEqual(selectSuggestionTools(tools, ["web_fetch", "web_search", "web_fetch"]), [tools[1], tools[0]]);
+    const manyTools = Array.from({ length: 200 }, (_, index) => ({
+      name: `tool_${index}`,
+      description: `Tool ${index}`,
+      parameters: {},
+    }));
+    assert.equal(selectSuggestionTools(manyTools, manyTools.map((tool) => tool.name)).length, 200);
     assert.throws(() => selectSuggestionTools(tools, []), /至少选择一个工具/);
     assert.throws(() => selectSuggestionTools(tools, ["missing"]), /不存在或已变化/);
   });
 
-  it("builds a bounded prompt from selected tools only", () => {
-    const prompt = buildSuggestionPrompt({ tools: [tools[0]], otherGroupNames: ["已有分组"] });
-    assert.match(prompt, /web_search/);
+  it("builds a prompt from selected tools only without truncating metadata", () => {
+    const longName = `tool_${"n".repeat(300)}`;
+    const longDescription = `description_${"d".repeat(1_000)}`;
+    const longGroupName = `已有分组_${"g".repeat(300)}`;
+    const prompt = buildSuggestionPrompt({
+      tools: [{ name: longName, description: longDescription, parameters: {} }],
+      otherGroupNames: [longGroupName],
+    });
+    assert.match(prompt, new RegExp(longName));
+    assert.match(prompt, new RegExp(longDescription));
+    assert.match(prompt, new RegExp(longGroupName));
     assert.doesNotMatch(prompt, /web_fetch/);
-    assert.match(prompt, /已有分组/);
     assert.doesNotMatch(prompt, /parameters/);
   });
 
@@ -43,6 +55,12 @@ describe("tool-manager group suggestions", () => {
     assert.deepEqual(parseGroupSuggestion('```json\n{"name":"网页助手","description":"处理网页内容。"}\n```'), {
       name: "网页助手",
       description: "处理网页内容。",
+    });
+    const longName = `名称_${"名".repeat(100)}`;
+    const longDescription = `描述_${"述".repeat(500)}`;
+    assert.deepEqual(parseGroupSuggestion(JSON.stringify({ name: longName, description: longDescription })), {
+      name: longName,
+      description: longDescription,
     });
     assert.throws(() => parseGroupSuggestion("not json"), /不是有效 JSON/);
     assert.throws(() => parseGroupSuggestion('{"name":"空描述","description":""}'), /名称或描述为空/);
@@ -105,17 +123,20 @@ describe("tool-manager group suggestions", () => {
     assert.doesNotMatch(prompt, /parameters/);
   });
 
-  it("parses multiple groups and fills omitted ungrouped tools", () => {
-    const result = parseAutoGroupResult(JSON.stringify({
-      groups: [
-        { name: "网页研究", description: "检索并读取网页。", tools: ["web_search", "web_fetch"] },
-      ],
-      ungrouped: [],
-    }), tools.map((tool) => tool.name), []);
-    assert.deepEqual(result, {
-      groups: [{ name: "网页研究", description: "检索并读取网页。", tools: ["web_search", "web_fetch"] }],
-      ungrouped: ["read"],
-    });
+  it("parses groups without count, name, or description length limits", () => {
+    const manyTools = Array.from({ length: 40 }, (_, index) => `tool_${index}`);
+    const longName = `长名称_${"名".repeat(100)}`;
+    const longDescription = `长描述_${"述".repeat(500)}`;
+    const groups = manyTools.map((toolName, index) => ({
+      name: index === 0 ? longName : `分组_${index}`,
+      description: index === 0 ? longDescription : `描述_${index}`,
+      tools: [toolName],
+    }));
+    const result = parseAutoGroupResult(JSON.stringify({ groups, ungrouped: [] }), manyTools, []);
+    assert.equal(result.groups.length, 40);
+    assert.equal(result.groups[0].name, longName);
+    assert.equal(result.groups[0].description, longDescription);
+    assert.deepEqual(result.ungrouped, []);
   });
 
   it("rejects invalid auto-group assignments", () => {
@@ -149,7 +170,22 @@ describe("tool-manager group suggestions", () => {
     }, { tools, otherGroupNames: [] });
     assert.equal(result.groups[0].name, "网页研究");
     assert.deepEqual(result.ungrouped, ["read"]);
-    assert.equal(options.maxTokens, 1600);
+    assert.equal(options.maxTokens, undefined);
+  });
+
+  it("collects model output beyond the former character limit", async () => {
+    const longDescription = `输出_${"长".repeat(9_000)}`;
+    const llm = {
+      async *stream() {
+        const output = JSON.stringify({ name: "长输出", description: longDescription });
+        yield { type: "text-delta", index: 0, text: output };
+        yield { type: "finish", reason: { kind: "stop" } };
+      },
+    };
+    const result = await generateGroupSuggestion(llm, {
+      currentSelection: () => ({ provider: "deepseek", model: "chat" }),
+    }, { tools: [tools[0]], otherGroupNames: [] });
+    assert.equal(result.description, longDescription);
   });
 
   it("generates auto-groups for a subset of selected tools only", async () => {
@@ -174,14 +210,14 @@ describe("tool-manager group suggestions", () => {
     });
   });
 
-  it("normalizes and validates custom prompts", () => {
+  it("normalizes custom prompts without a length limit", () => {
     assert.equal(normalizeCustomPrompt(undefined), undefined);
     assert.equal(normalizeCustomPrompt(null), undefined);
     assert.equal(normalizeCustomPrompt(""), undefined);
     assert.equal(normalizeCustomPrompt("   "), undefined);
     assert.equal(normalizeCustomPrompt("  自定义提示词  "), "自定义提示词");
+    assert.equal(normalizeCustomPrompt("a".repeat(100_000)), "a".repeat(100_000));
     assert.throws(() => normalizeCustomPrompt(123), /prompt must be a string/);
-    assert.throws(() => normalizeCustomPrompt("a".repeat(MAX_CUSTOM_PROMPT_LENGTH + 1)), /提示词过长/);
   });
 
   it("uses custom prompt in generateGroupSuggestion when provided", async () => {
@@ -193,10 +229,11 @@ describe("tool-manager group suggestions", () => {
         yield { type: "finish", reason: { kind: "stop" } };
       },
     };
-    const customPrompt = "自定义提示词：为网络类工具生成名称和描述";
+    const customPrompt = `自定义提示词：${"为网络类工具生成名称和描述".repeat(4_000)}`;
     const result = await generateGroupSuggestion(llm, {
       currentSelection: () => ({ provider: "deepseek", model: "chat" }),
     }, { tools: tools.slice(0, 2), otherGroupNames: [], prompt: customPrompt });
+    assert.ok(customPrompt.length > 32_000);
     assert.equal(promptText, customPrompt);
     assert.deepEqual(result, { name: "定制名称", description: "按定制提示生成的描述。" });
   });

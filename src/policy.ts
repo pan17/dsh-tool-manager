@@ -229,7 +229,7 @@ export function asRecord(value: unknown): Record<string, unknown> | undefined {
 }
 
 export function normalizeGroupName(value: string): string {
-  return value.trim().replace(/\s+/g, " ").slice(0, 80);
+  return value.trim().replace(/\s+/g, " ");
 }
 
 function groupNameOf(group: Record<string, unknown> | undefined): string {

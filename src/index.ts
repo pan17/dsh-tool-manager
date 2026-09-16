@@ -14,7 +14,6 @@ import { DISCOVERY_TOOL_NAME, PTC_TRANSPORT_NAME } from "./types.js";
 import {
   generateAutoGroups,
   generateGroupSuggestion,
-  MAX_AUTO_GROUP_TOOLS,
   normalizeCustomPrompt,
   normalizeGroupNames,
   validateGenerationTimeout,
@@ -132,7 +131,7 @@ export function apply(ctx: unknown): void {
           const key = await presets.standingKeyFor(presetId);
           const schemas = tools.schemas(key)
             .filter((schema) => schema.name !== DISCOVERY_TOOL_NAME && schema.name !== PTC_TRANSPORT_NAME);
-          const selected = selectSuggestionTools(schemas, body?.toolNames, MAX_AUTO_GROUP_TOOLS);
+          const selected = selectSuggestionTools(schemas, body?.toolNames);
           const otherGroupNames = normalizeGroupNames(body?.otherGroupNames);
           const timeoutMs = body?.timeoutMs === undefined
             ? undefined
@@ -217,11 +216,8 @@ export async function assertNoEmptyGroups(
 
 async function readJsonBody(req: HttpRequest): Promise<unknown> {
   const chunks: Buffer[] = [];
-  let bytes = 0;
   for await (const chunk of req) {
     const buffer = typeof chunk === "string" ? Buffer.from(chunk) : Buffer.from(chunk as Uint8Array);
-    bytes += buffer.byteLength;
-    if (bytes > 262_144) throw new Error("request body exceeds 256 KiB");
     chunks.push(buffer);
   }
   const raw = Buffer.concat(chunks).toString("utf8");
