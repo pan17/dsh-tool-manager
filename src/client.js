@@ -13,12 +13,13 @@ window.__ModuleLoader__.load({
 			".tm_root{display:flex;flex-direction:column;gap:14px;max-width:1040px;padding:2px 0 30px;color:var(--dsw-alias-label-primary,#e7e9ed)}",
 			".tm_head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}",
 			".tm_head h2{font-size:18px;margin:0 0 5px}.tm_muted{color:var(--dsw-alias-label-secondary,#9097a4);font-size:12px;line-height:1.5}",
-			".tm_tabs{display:flex;gap:7px;flex-wrap:wrap}.tm_tab,.tm_btn{appearance:none;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));border-radius:8px;background:var(--dsw-alias-bg-layer-1,rgba(128,128,128,.08));color:inherit;padding:7px 10px;cursor:pointer;font:inherit;font-size:12px}.tm_tab.active{border-color:#7c8cff;background:color-mix(in srgb,#7c8cff 16%,transparent)}.tm_btn.primary{background:#5367e8;border-color:#5367e8;color:#fff}.tm_btn:disabled{opacity:.5;cursor:not-allowed}",
+			".tm_preset_picker{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.tm_preset_picker label{font-size:12px;color:var(--dsw-alias-label-secondary,#9097a4)}.tm_preset_select,.tm_btn{appearance:none;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));border-radius:8px;background:var(--dsw-alias-bg-layer-1,rgba(128,128,128,.08));color:inherit;padding:7px 10px;font:inherit;font-size:12px}.tm_preset_select{min-width:min(360px,100%);cursor:pointer}.tm_preset_select option{background:var(--dsw-alias-bg-base,#17191d);color:inherit}.tm_btn{cursor:pointer}.tm_btn.primary{background:#5367e8;border-color:#5367e8;color:#fff}.tm_btn:disabled{opacity:.5;cursor:not-allowed}",
 			".tm_panel{border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.24));border-radius:12px;background:var(--dsw-alias-bg-layer-1,rgba(128,128,128,.06));overflow:hidden}",
 			".tm_panel_head{padding:13px 14px;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.2));display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.tm_panel_head b{font-size:14px}",
 			".tm_tools{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:0}.tm_tool{display:flex;gap:10px;align-items:flex-start;padding:11px 14px;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.13))}.tm_tool_name{font:600 12px ui-monospace,SFMono-Regular,Consolas,monospace}.tm_tool_desc{font-size:11px;color:var(--dsw-alias-label-secondary,#9097a4);line-height:1.4;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}",
 			".tm_row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.tm_input{box-sizing:border-box;min-width:130px;flex:1;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.3));border-radius:7px;background:var(--dsw-alias-bg-base,#17191d);color:inherit;padding:7px 9px;font:inherit;font-size:12px}.tm_code{font:11px ui-monospace,SFMono-Regular,Consolas,monospace;color:#9da8ff}.tm_notice{padding:12px;border-radius:9px;background:color-mix(in srgb,#f59e0b 12%,transparent);font-size:12px}.tm_error{padding:12px;border-radius:9px;background:color-mix(in srgb,#ef4444 12%,transparent);color:#fca5a5;font-size:12px}",
 			".tm_filters{display:flex;gap:6px;flex-wrap:wrap;align-items:center}.tm_chip{appearance:none;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));border-radius:999px;background:transparent;color:inherit;padding:4px 9px;cursor:pointer;font:inherit;font-size:11px}.tm_chip.active{border-color:#7c8cff;background:color-mix(in srgb,#7c8cff 16%,transparent)}",
+			".tm_stats{display:grid;grid-template-columns:repeat(5,minmax(100px,1fr));gap:8px;padding:10px 14px;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.13))}.tm_stat{min-width:0;padding:9px 10px;border-radius:8px;background:var(--dsw-alias-bg-layer-1,rgba(128,128,128,.07));border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.15))}.tm_stat_value{font-size:18px;font-weight:700;line-height:1.2}.tm_stat_label{margin-top:3px;font-size:11px;color:var(--dsw-alias-label-secondary,#9097a4)}@media(max-width:720px){.tm_stats{grid-template-columns:repeat(2,minmax(100px,1fr))}}",
 			".tm_badge{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:999px;font-size:10px;vertical-align:middle}.tm_badge.off{background:color-mix(in srgb,#ef4444 18%,transparent);color:#fca5a5}.tm_badge.cold{background:color-mix(in srgb,#6366f1 18%,transparent);color:#c7d2fe}.tm_badge.live{background:color-mix(in srgb,#22c55e 16%,transparent);color:#86efac}",
 			".tm_group{border-bottom:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.13))}.tm_group:last-child{border-bottom:0}",
 			".tm_group_bar{display:flex;align-items:center;gap:8px;padding:11px 14px}",
@@ -32,7 +33,7 @@ window.__ModuleLoader__.load({
 			".tm_modal_mask{position:absolute;inset:0;background:rgba(0,0,0,.55)}",
 			".tm_modal_card{position:relative;z-index:1;width:min(720px,100%);max-height:min(84vh,760px);display:flex;flex-direction:column;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));border-radius:14px;background:var(--dsw-alias-bg-base,#17191d);box-shadow:0 24px 80px rgba(0,0,0,.45)}",
 			".tm_modal_head{padding:16px 16px 12px;display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.tm_modal_head h3{margin:0;font-size:16px}",
-			".tm_modal_body{padding:0 16px 12px;display:flex;flex-direction:column;gap:10px;min-height:0;flex:1}",
+			".tm_modal_body{padding:0 16px 12px;display:flex;flex-direction:column;gap:10px;min-height:0;flex:1;overflow:auto}",
 			".tm_modal_foot{padding:12px 16px 16px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.18))}",
 			".tm_picker{min-height:180px;max-height:min(46vh,420px);overflow:auto;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.18));border-radius:8px;background:var(--dsw-alias-bg-layer-1,rgba(128,128,128,.06))}",
 			".tm_pick{display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.1))}.tm_pick:last-child{border-bottom:0}",
@@ -95,6 +96,19 @@ window.__ModuleLoader__.load({
 			}
 			return names;
 		}
+		function catalogStats(preset) {
+			const disabled = new Set(preset.policy.disabled || []);
+			const grouped = groupedNames(preset);
+			let ungroupedTools = 0;
+			let onDemandTools = 0;
+			let disabledTools = 0;
+			for (const tool of preset.tools || []) {
+				if (disabled.has(tool.name)) disabledTools += 1;
+				else if (grouped.has(tool.name)) onDemandTools += 1;
+				else ungroupedTools += 1;
+			}
+			return { totalTools: (preset.tools || []).length, groupCount: (preset.policy.groups || []).length, ungroupedTools, onDemandTools, disabledTools };
+		}
 		function matchesQuery(tool, needle) {
 			if (!needle) return true;
 			return tool.name.toLowerCase().includes(needle) || (tool.description || "").toLowerCase().includes(needle);
@@ -116,13 +130,16 @@ window.__ModuleLoader__.load({
 			const [query, setQuery] = react.useState("");
 			const [filter, setFilter] = react.useState("all");
 			const [modal, setModal] = react.useState(null);
+			const [autoGrouping, setAutoGrouping] = react.useState(false);
+			const [autoGroupError, setAutoGroupError] = react.useState("");
+			const [autoPreview, setAutoPreview] = react.useState(null);
 			const [expanded, setExpanded] = react.useState({});
 
 			const load = react.useCallback(() => {
 				setBusy(true); setError("");
 				return api("/snapshot").then((value) => {
 					const next = withGroupKeys(value);
-					setSnapshot(value); setDraft(next); setModal(null);
+					setSnapshot(value); setDraft(next); setModal(null); setAutoPreview(null); setAutoGroupError("");
 					setActive((current) => current && value.presets.some((p) => p.id === current) ? current : (value.presets[0] && value.presets[0].id) || "");
 				}).catch((e) => setError(String(e.message || e))).finally(() => setBusy(false));
 			}, []);
@@ -166,6 +183,8 @@ window.__ModuleLoader__.load({
 					description: "",
 					patterns: [],
 					query: "",
+					generating: false,
+					generateError: "",
 				});
 			}
 
@@ -177,6 +196,8 @@ window.__ModuleLoader__.load({
 					description: group.description || "",
 					patterns: [...(group.patterns || [])],
 					query: "",
+					generating: false,
+					generateError: "",
 				});
 			}
 
@@ -190,6 +211,33 @@ window.__ModuleLoader__.load({
 
 			function patchModal(patch) {
 				setModal((current) => current ? { ...current, ...patch } : current);
+			}
+
+			function generateGroupDetails() {
+				if (!modal || modal.generating || !(modal.patterns || []).length) return;
+				const key = modal.key;
+				const otherGroupNames = (preset.policy.groups || [])
+					.filter((group) => group._key !== key)
+					.map((group) => group.name)
+					.filter(Boolean);
+				const toolNames = matchingTools(preset.tools, modal.patterns || []).map((tool) => tool.name);
+				if (!toolNames.length) {
+					patchModal({ generateError: "所选模式当前没有匹配到工具，请重新勾选。" });
+					return;
+				}
+				patchModal({ generating: true, generateError: "" });
+				api("/suggest-group", {
+					method: "POST",
+					body: JSON.stringify({ presetId: preset.id, toolNames, otherGroupNames }),
+				}).then((suggestion) => {
+					setModal((current) => current && current.key === key
+						? { ...current, name: suggestion.name || current.name, description: suggestion.description || current.description, generating: false, generateError: "" }
+						: current);
+				}).catch((e) => {
+					setModal((current) => current && current.key === key
+						? { ...current, generating: false, generateError: String(e.message || e) }
+						: current);
+				});
 			}
 
 			function confirmModal() {
@@ -221,6 +269,62 @@ window.__ModuleLoader__.load({
 				}
 			}
 
+			function autoGroupSignature(toolNames) {
+				return preset.id + "\n" + [...toolNames].sort().join("\n");
+			}
+
+			function startAutoGroup() {
+				if (autoGrouping) return;
+				const disabledNames = new Set(preset.policy.disabled || []);
+				const alreadyGrouped = groupedNames(preset);
+				const candidates = (preset.tools || []).filter((tool) => !disabledNames.has(tool.name) && !alreadyGrouped.has(tool.name));
+				if (!candidates.length) {
+					setAutoGroupError("当前没有未分组且未关闭的工具。");
+					return;
+				}
+				const toolNames = candidates.map((tool) => tool.name);
+				const signature = autoGroupSignature(toolNames);
+				setAutoGrouping(true); setAutoGroupError(""); setAutoPreview(null);
+				api("/auto-group", {
+					method: "POST",
+					body: JSON.stringify({
+						presetId: preset.id,
+						toolNames,
+						otherGroupNames: (preset.policy.groups || []).map((group) => group.name).filter(Boolean),
+					}),
+				}).then((result) => {
+					setAutoPreview({ presetId: preset.id, signature, groups: result.groups || [], ungrouped: result.ungrouped || [] });
+				}).catch((e) => setAutoGroupError(String(e.message || e))).finally(() => setAutoGrouping(false));
+			}
+
+			function applyAutoGroups() {
+				if (!autoPreview || autoPreview.presetId !== preset.id) return;
+				const disabledNames = new Set(preset.policy.disabled || []);
+				const alreadyGrouped = groupedNames(preset);
+				const currentCandidates = (preset.tools || []).filter((tool) => !disabledNames.has(tool.name) && !alreadyGrouped.has(tool.name)).map((tool) => tool.name);
+				if (autoPreview.signature !== autoGroupSignature(currentCandidates)) {
+					setAutoPreview(null);
+					setAutoGroupError("工具或分组草稿已经变化，请重新自动分组。");
+					return;
+				}
+				const addedKeys = [];
+				mutatePreset((target) => {
+					if (!Array.isArray(target.policy.groups)) target.policy.groups = [];
+					for (const group of autoPreview.groups) {
+						const key = newKey();
+						addedKeys.push(key);
+						target.policy.groups.push({ _key: key, name: group.name, description: group.description, patterns: [...group.tools] });
+					}
+				});
+				setExpanded((current) => {
+					const next = { ...current };
+					for (const key of addedKeys) next[key] = true;
+					return next;
+				});
+				setFilter("cold"); setQuery(""); setAutoPreview(null); setAutoGroupError("");
+				setMessage("自动分组已加入草稿；检查后请点击保存。");
+			}
+
 			function save() {
 				const settings = { presets: {} };
 				for (const item of draft.presets) settings.presets[item.id] = policyPayload(item.policy);
@@ -237,6 +341,8 @@ window.__ModuleLoader__.load({
 
 			const disabled = new Set(preset.policy.disabled || []);
 			const grouped = groupedNames(preset);
+			const autoGroupCandidates = (preset.tools || []).filter((tool) => !disabled.has(tool.name) && !grouped.has(tool.name));
+			const stats = catalogStats(preset);
 			const needle = query.trim().toLowerCase();
 			const groups = preset.policy.groups || [];
 			const visibleGroups = groups.filter((group) => {
@@ -314,15 +420,17 @@ window.__ModuleLoader__.load({
 						),
 						h("div", { className: "tm_modal_body" },
 							h("div", { className: "tm_row" },
-								h("input", { className: "tm_input", value: modal.name, placeholder: "名称（模型用这个打开）", onChange: (e) => patchModal({ name: e.target.value }) }),
+								h("input", { className: "tm_input", value: modal.name, placeholder: "名称（模型用这个打开）", onChange: (e) => patchModal({ name: e.target.value, generateError: "" }) }),
+								h("button", { className: "tm_btn", disabled: modal.generating || modalSelected.size === 0 || matchingTools(preset.tools, modal.patterns || []).length === 0, onClick: generateGroupDetails }, modal.generating ? "生成中…" : "自动生成名称和描述"),
 							),
-							h("textarea", { className: "tm_input", style: { width: "100%", minHeight: "72px", resize: "vertical" }, value: modal.description, placeholder: "描述（可选）", onChange: (e) => patchModal({ description: e.target.value }) }),
+							modal.generateError ? h("div", { className: "tm_error" }, modal.generateError) : null,
+							h("textarea", { className: "tm_input", style: { width: "100%", minHeight: "72px", resize: "vertical" }, value: modal.description, placeholder: "描述（可选）", onChange: (e) => patchModal({ description: e.target.value, generateError: "" }) }),
 							h("div", { className: "tm_row" },
 								h("input", { className: "tm_input", value: modal.query, placeholder: "筛选工具名或描述", onChange: (e) => patchModal({ query: e.target.value }) }),
-								h("button", { className: "tm_btn", disabled: pickerTools.length === 0, onClick: () => patchModal({ patterns: [...new Set([...(modal.patterns || []), ...pickerTools.map((tool) => tool.name)])] }) }, "全选当前筛选"),
-								h("button", { className: "tm_btn", disabled: visibleSelected.length === 0, onClick: () => patchModal({ patterns: (modal.patterns || []).filter((name) => !visibleSelected.includes(name)) }) }, "清除当前筛选"),
+								h("button", { className: "tm_btn", disabled: pickerTools.length === 0, onClick: () => patchModal({ patterns: [...new Set([...(modal.patterns || []), ...pickerTools.map((tool) => tool.name)])], generateError: "" }) }, "全选当前筛选"),
+								h("button", { className: "tm_btn", disabled: visibleSelected.length === 0, onClick: () => patchModal({ patterns: (modal.patterns || []).filter((name) => !visibleSelected.includes(name)), generateError: "" }) }, "清除当前筛选"),
 							),
-							h("div", { className: "tm_muted" }, "已选 " + modalSelected.size + " 个工具"),
+							h("div", { className: "tm_muted" }, "已选 " + modalSelected.size + " 个工具。自动生成会调用当前默认模型，结果仍可手动修改。"),
 							pickerTools.length
 								? h("div", { className: "tm_picker" }, pickerTools.map((tool) => h("label", { className: "tm_pick", key: tool.name },
 									h("input", {
@@ -331,7 +439,7 @@ window.__ModuleLoader__.load({
 										onChange: (e) => {
 											const next = new Set(modal.patterns || []);
 											if (e.target.checked) next.add(tool.name); else next.delete(tool.name);
-											patchModal({ patterns: [...next] });
+											patchModal({ patterns: [...next], generateError: "" });
 										},
 									}),
 									h("span", null,
@@ -343,7 +451,31 @@ window.__ModuleLoader__.load({
 						),
 						h("div", { className: "tm_modal_foot" },
 							h("button", { className: "tm_btn", onClick: () => setModal(null) }, "取消"),
-							h("button", { className: "tm_btn primary", disabled: !canConfirm, onClick: confirmModal }, "确定"),
+							h("button", { className: "tm_btn primary", disabled: !canConfirm || modal.generating, onClick: confirmModal }, "确定"),
+						),
+					),
+				),
+				document.body,
+			) : null;
+
+			const previewDialog = autoPreview && typeof document !== "undefined" ? reactDom.createPortal(
+				h("div", { className: "tm_modal", role: "dialog", "aria-modal": "true", "aria-label": "自动分组预览" },
+					h("div", { className: "tm_modal_mask", onMouseDown: () => setAutoPreview(null) }),
+					h("div", { className: "tm_modal_card" },
+						h("div", { className: "tm_modal_head" },
+							h("div", null, h("h3", null, "自动分组预览"), h("div", { className: "tm_muted" }, "确认后只加入页面草稿，仍需点击保存。")),
+							h("button", { className: "tm_btn", onClick: () => setAutoPreview(null) }, "关闭"),
+						),
+						h("div", { className: "tm_modal_body" },
+							autoPreview.groups.map((group, index) => h("div", { className: "tm_panel", key: group.name + index },
+								h("div", { className: "tm_panel_head" }, h("div", null, h("b", null, group.name), h("div", { className: "tm_muted" }, group.description)), h("span", { className: "tm_group_count" }, group.tools.length + " 个工具")),
+								h("div", { style: { padding: "10px 14px" } }, group.tools.map((name) => h("div", { className: "tm_member tm_tool_name", key: name }, name))),
+							)),
+							autoPreview.ungrouped.length ? h("div", { className: "tm_notice" }, "保持常开、未归组：", h("span", { className: "tm_code" }, autoPreview.ungrouped.join(", "))) : null,
+						),
+						h("div", { className: "tm_modal_foot" },
+							h("button", { className: "tm_btn", onClick: () => setAutoPreview(null) }, "取消"),
+							h("button", { className: "tm_btn primary", onClick: applyAutoGroups }, "确认加入草稿"),
 						),
 					),
 				),
@@ -356,19 +488,38 @@ window.__ModuleLoader__.load({
 				h("div", { className: "tm_head" },
 					h("div", null, h("h2", null, "Agent 工具管理"), h("div", { className: "tm_muted" }, "按每个 Agent 预设开关工具。点「分组」把不常用的收进按需组：平时模型看不到，需要时先查目录再打开。")),
 					h("div", { className: "tm_row" },
-						h("button", { className: "tm_btn", onClick: load, disabled: busy }, "刷新"),
-						h("button", { className: "tm_btn primary", onClick: save, disabled: busy || !draft.writable }, busy ? "处理中…" : "保存"),
+						h("button", { className: "tm_btn", onClick: load, disabled: busy || autoGrouping }, "刷新"),
+						h("button", { className: "tm_btn primary", onClick: save, disabled: busy || autoGrouping || !draft.writable }, busy ? "处理中…" : "保存"),
 					),
 				),
-				!draft.writable ? h("div", { className: "tm_notice" }, "当前 Settings provider 只读，不能保存。") : null,
+				!draft.writable ? h("div", { className: "tm_notice" }, "当前配置文件不可写，不能保存。") : null,
 				error ? h("div", { className: "tm_error" }, error) : null,
 				message ? h("div", { className: "tm_notice" }, message) : null,
-				h("div", { className: "tm_tabs" }, draft.presets.map((item) => h("button", { key: item.id, className: "tm_tab" + (item.id === preset.id ? " active" : ""), onClick: () => { setActive(item.id); setQuery(""); setFilter("all"); setModal(null); setExpanded({}); } }, (item.name || item.id) + (item.isDefault ? " · 默认" : "") + (item.trust === "system" ? "" : " · 用户")))),
+				draft.configPath ? h("div", { className: "tm_muted" }, "配置文件：", h("span", { className: "tm_code" }, draft.configPath)) : null,
+				h("div", { className: "tm_preset_picker" },
+					h("label", { htmlFor: "tm-preset-select" }, "Agent Preset"),
+					h("select", {
+						id: "tm-preset-select",
+						className: "tm_preset_select",
+						value: preset.id,
+						disabled: autoGrouping,
+						onChange: (event) => { setActive(event.target.value); setQuery(""); setFilter("all"); setModal(null); setAutoPreview(null); setAutoGroupError(""); setExpanded({}); },
+					}, draft.presets.map((item) => h("option", { key: item.id, value: item.id }, (item.name || item.id) + " · " + (item.tools || []).length + " 个工具" + (item.isDefault ? " · 默认" : "") + (item.trust === "system" ? "" : " · 用户")))),
+				),
 				preset.broken ? h("div", { className: "tm_error" }, preset.broken) : null,
+				autoGroupError ? h("div", { className: "tm_error" }, autoGroupError) : null,
 				h("section", { className: "tm_panel" },
 					h("div", { className: "tm_panel_head" },
 						h("div", null, h("b", null, "工具目录"), h("div", { className: "tm_muted" }, "关掉后立刻对模型隐藏。按需组默认隐藏，模型要先调用 tool_list 才能使用。")),
-						h("button", { className: "tm_btn", onClick: openCreate }, "分组"),
+						h("div", { className: "tm_row" },
+							h("button", { className: "tm_btn", onClick: startAutoGroup, disabled: autoGrouping || autoGroupCandidates.length === 0, title: autoGroupCandidates.length ? "用默认模型对未分组且未关闭的工具进行聚类" : "没有可自动分组的工具" }, autoGrouping ? "自动分组中…" : "自动分组"),
+							h("button", { className: "tm_btn", onClick: openCreate, disabled: autoGrouping }, "分组"),
+						),
+					),
+					h("div", { className: "tm_stats" },
+						[["工具总量", stats.totalTools], ["分组数量", stats.groupCount], ["未分组工具", stats.ungroupedTools], ["按需工具", stats.onDemandTools], ["已关闭工具", stats.disabledTools]].map(([label, value]) =>
+							h("div", { className: "tm_stat", key: label }, h("div", { className: "tm_stat_value" }, value), h("div", { className: "tm_stat_label" }, label)),
+						),
 					),
 					h("div", { className: "tm_row", style: { padding: "10px 14px" } },
 						h("input", { className: "tm_input", value: query, placeholder: "搜索工具名、描述或组名", onChange: (e) => setQuery(e.target.value) }),
@@ -389,6 +540,7 @@ window.__ModuleLoader__.load({
 					) : null,
 				),
 				dialog,
+				previewDialog,
 			);
 		}
 

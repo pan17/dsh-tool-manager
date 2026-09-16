@@ -1,9 +1,8 @@
-import type { AgentPresetsLike, SettingsProviderLike, ToolRuntimeLike } from "./dsh.js";
+import type { AgentPresetsLike, ToolRuntimeLike } from "./dsh.js";
 import { policyFor, policyOrphans, resolveGroups } from "./policy.js";
 import {
   DISCOVERY_TOOL_NAME,
   PTC_TRANSPORT_NAME,
-  SETTINGS_NAMESPACE,
   type PresetCatalogView,
   type ToolManagerSettings,
   type ToolManagerSnapshot,
@@ -13,13 +12,11 @@ import {
 export async function buildSnapshot(
   presets: AgentPresetsLike,
   tools: ToolRuntimeLike,
-  settingsProvider: SettingsProviderLike,
   settings: ToolManagerSettings,
+  revision: number,
+  configPath: string,
 ): Promise<ToolManagerSnapshot> {
   const compositions = await presets.compositionInventory();
-  const descriptor = settingsProvider
-    .describe({ redactSecrets: true })
-    .find((item) => String(item.ns) === SETTINGS_NAMESPACE);
   const views: PresetCatalogView[] = [];
 
   for (const composition of compositions) {
@@ -51,8 +48,9 @@ export async function buildSnapshot(
   }
 
   return {
-    writable: settingsProvider.writable,
-    revision: descriptor?.revision ?? 0,
+    writable: true,
+    revision,
+    configPath,
     presets: views,
   };
 }

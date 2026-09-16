@@ -75,8 +75,8 @@ npm test
 1. 打开 **设置 → 工具管理**。
 2. 选择一个 Preset。
 3. 关闭不希望该 Preset 使用的工具。
-4. 新建按需工具组，筛选并勾选要收进去的工具。
-5. 保存。
+4. 新建或编辑按需工具组，筛选并勾选要收进去的工具；也可点击“自动生成名称和描述”，让当前默认模型根据所选工具填写草稿。
+5. 检查或修改生成结果后确定，再保存。
 6. 模型平时只看到 `tool_list`；需要某组工具时用 **名称** 调用，该组全部工具立刻打开：
 
 ```json
@@ -85,30 +85,47 @@ npm test
 
 ## 策略存储
 
-配置保存在 DSH Settings 的 `tool-manager` namespace：
+策略使用独立 JSON 文件，不写入 DSH Settings：
 
-```yaml
-tool-manager:
-  presets:
-    standard:
-      disabled:
-        - codex_image_generate
-      groups:
-        - name: GitHub MCP
-          description: GitHub 相关工具
-          patterns:
-            - mcp__github__create_issue
-            - mcp__github__list_issues
+- 默认路径：`$DSH_HOME/tool-manager.json`；未设置 `DSH_HOME` 时为 `~/.dsh/tool-manager.json`；
+- 可用环境变量 `DSH_TOOL_MANAGER_CONFIG` 指定其他路径；
+- 文件会在 WebUI 第一次保存时自动创建，页面也会显示当前实际路径；
+- 写入采用临时文件替换，且保存请求携带 revision，避免并发页面覆盖新配置。
+
+```json
+{
+  "presets": {
+    "standard": {
+      "disabled": ["codex_image_generate"],
+      "groups": [
+        {
+          "name": "GitHub MCP",
+          "description": "GitHub 相关工具",
+          "patterns": [
+            "mcp__github__create_issue",
+            "mcp__github__list_issues"
+          ]
+        }
+      ]
+    }
+  }
+}
 ```
 
-`disabled` 优先级高于组打开；即使同一个工具也被某个 group 匹配，显式关闭仍不会被 `tool_list` 解锁。打开后的组在当前 Agent 会话里一直可用，不会按步数收回。
+从旧版升级时，原 Settings `tool-manager` namespace 不会被自动迁移或删除；请在升级前导出原策略，或在新页面中重新保存。`disabled` 优先级高于组打开；即使同一个工具也被某个 group 匹配，显式关闭仍不会被 `tool_list` 解锁。打开后的组在当前 Agent 会话里一直可用，不会按步数收回。
+
+“自动生成名称和描述”适用于新建和编辑分组，会把所选工具的名称与描述发送给 DSH 当前默认模型，因此会产生一次模型调用和相应模型用量。生成内容只回填当前弹窗，不会自动确定或写入配置文件；模型未配置、调用失败或输出无效时，已选工具和手工草稿都会保留。
+
+工具目录上的“自动分组”会将当前 Preset 中**尚未加入任何按需组且未关闭**的工具发送给默认模型，由模型按能力和使用场景聚类，并为每个新组生成名称与描述。结果会先显示预览；取消不会修改草稿，确认后也只加入页面草稿，仍需点击“保存”才写入配置。已有分组和已关闭工具不会被移动，模型未归组的工具继续保持常开。
+
+工具目录会独立显示五项统计：工具总量、分组数量、未分组工具、按需工具和已关闭工具。分组数量包含空组；orphan 关闭项不计入已关闭工具。同一个工具即使被多个组匹配也只统计一次，且显式关闭优先，所以对当前真实工具目录始终满足 `未分组工具 + 按需工具 + 已关闭工具 = 工具总量`。“未分组工具”与自动分组的候选范围一致。
 
 ## 当前边界
 
 - 策略按 Preset 定义，但实时应用于该 Preset 的每个 live Agent；
 - 修改策略不会改写 shipped preset 文件；
 - 插件 row 本身是否启动（例如 MCP 进程是否常驻）仍由 Cordis composition 决定；
-- WebUI 当前通过同源 HTTP API 读写；设置页会为列出 schema 而 standing-mount 尚未挂载的 Preset；
+- WebUI 当前通过同源 HTTP API 读写独立配置文件；设置页会为列出 schema 而 standing-mount 尚未挂载的 Preset；
 - 按需组说明走 skill 同款会话目录：`agent/pre-step` 写入一条持久的 `<system-reminder>` 用户消息，不依赖系统提示段。极简模式的 `complete: true` persona 因此也能看到组名；标准模式不再往系统提示后部塞第二份名单。
 
 ## 开发状态

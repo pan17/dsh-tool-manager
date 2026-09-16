@@ -1,4 +1,3 @@
-export const SETTINGS_NAMESPACE = "tool-manager";
 export const DISCOVERY_TOOL_NAME = "tool_list";
 export const PTC_TRANSPORT_NAME = "run_code";
 
@@ -57,6 +56,7 @@ export interface PresetCatalogView {
 export interface ToolManagerSnapshot {
   writable: boolean;
   revision: number;
+  configPath: string;
   presets: PresetCatalogView[];
 }
 

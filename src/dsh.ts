@@ -36,6 +36,38 @@ export interface ToolRuntimeLike {
   restrict(filter: { deny: string[] }): () => void;
 }
 
+export interface ModelSelectionLike {
+  provider: string;
+  model: string;
+  reasoningEffort?: string;
+}
+
+export interface AgentDefaultModelLike {
+  currentSelection(): ModelSelectionLike;
+}
+
+export type StreamChunkLike =
+  | { type: "block-start"; index: number; blockType: string }
+  | { type: "text-delta"; index: number; text: string }
+  | { type: "reasoning-delta"; index: number; text: string }
+  | { type: "tool-call-delta"; index: number; name?: string; argumentsDelta: string }
+  | { type: "block-end"; index: number; block: { type: string; text?: string } }
+  | { type: "usage"; usage: unknown }
+  | { type: "finish"; reason: { kind: string; failure?: { message?: string } } };
+
+export interface LlmRuntimeLike {
+  stream(options: {
+    provider: string;
+    model: string;
+    reasoningEffort?: string;
+    messages: unknown[];
+    system?: string;
+    temperature?: number;
+    maxTokens?: number;
+    signal?: AbortSignal;
+  }): AsyncIterable<StreamChunkLike>;
+}
+
 export interface AgentPresetsLike {
   composedPreset(agentCtx: ContextLike): string | undefined;
   compositionInventory(): Promise<PresetCompositionLike[]>;
@@ -48,23 +80,6 @@ export interface PresetCompositionLike {
   trust: "system" | "user";
   isDefault: boolean;
   broken?: string;
-}
-
-export interface SettingsDescriptorLike {
-  ns: string;
-  revision: number;
-}
-
-export interface SettingsScopeLike {
-  get(): unknown;
-  watch(callback: (next: unknown, prev: unknown) => void | Promise<void>): () => void;
-}
-
-export interface SettingsProviderLike {
-  writable: boolean;
-  register(ns: string, schema: unknown, options?: unknown): SettingsScopeLike;
-  describe(options?: { redactSecrets?: boolean }): SettingsDescriptorLike[];
-  replace(ns: string, section: object, expectedRevision?: number): Promise<void>;
 }
 
 export interface AgentsLike {

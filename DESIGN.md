@@ -61,7 +61,7 @@ Agent loop 在 `preStep()` 中**先** `systemPrompt.assemble()`，**再**跑 `ag
 
 `agentPresets.compositionInventory()` 可给出每个 Preset 的插件 rows；内置 WebUI 的插件清单也明确只读。`agentPresets.copy()` 是唯一官方 authoring write，当前没有任意写回 composition 的公开 API。
 
-所以 MVP 将工具开关保存在独立 Settings namespace，而不是修改 shipped preset 或直接操作 Loader entry。
+工具开关保存在 `$DSH_HOME/tool-manager.json`（可由 `DSH_TOOL_MANAGER_CONFIG` 覆盖）的独立配置文件中，而不是修改 shipped preset、DSH Settings 或直接操作 Loader entry。
 
 设置页为了列出每个 Preset 的实际 schema，会对未 broken 的 Preset 调用 `standingKeyFor()`。这会创建/复用 standing mount（与开一个该 Preset 的会话相同），但不会改写 composition 文件。
 
@@ -69,10 +69,10 @@ Agent loop 在 `preStep()` 中**先** `systemPrompt.assemble()`，**再**跑 `ag
 
 ```text
                         ┌──────────────────────────┐
-Web Settings page ─────▶│ tool-manager Settings    │
+Web Settings page ─────▶│ tool-manager.json        │
                         │ presets[presetId] policy │
                         └────────────┬─────────────┘
-                                     │ live watch
+                                     │ save/update
                                      ▼
 ┌──────────────────┐       ┌────────────────────────┐
 │ Agent Preset      │──────▶│ Host Policy Runtime    │
@@ -161,9 +161,9 @@ DSH 内置文件/Web 等工具 guidance 会通过 `ctx.tools.get(name, scope)` �
 当前实现：
 
 - `settings.section` 新增「工具管理」页面；
-- Host 使用 `tool-manager` Settings namespace；
+- Host 使用独立的 `$DSH_HOME/tool-manager.json`，也可由 `DSH_TOOL_MANAGER_CONFIG` 指定路径；
 - 同源 HTTP endpoint 提供 snapshot/save；
-- 保存携带 Settings revision，拒绝 stale write；
+- 保存携带文件存储 revision，拒绝 stale write，并以临时文件原子替换；
 - WebUI 不直接编辑 `agent.cordis.yml`，因此绝不会损坏 shipped preset；
 - 设置页支持搜索、常开/按需/关闭筛选、组内筛选勾选、以及 orphan disable 清理。
 
