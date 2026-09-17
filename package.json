@@ -1,6 +1,6 @@
 {
   "name": "dsh-tool-manager",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "Manage DSH agent tools per preset and open on-demand tool groups for the rest of a session",
   "type": "module",
   "files": [

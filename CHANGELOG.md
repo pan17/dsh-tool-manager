@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+## [1.2.4] - 2026-10-22
+
+### Fixed
+
+- Preset 动态工具探测不再为每次页面请求和每个空闲 Preset 创建随机 `tool-manager-probe-*` Session。现在所有冷 Preset 串行复用唯一的 `tool-manager-probe-internal-v1`，跨插件重载恢复同一个持久化 Session，并以 `origin: subagent` 从普通会话列表隐藏。
+- 固定探针恢复失败时直接报错并回退现有工具目录，不创建随机或递增 ID 的替代 Session，避免会话存储持续增长。
+
 ## [1.2.3] - 2026-10-22
 
 ### Fixed

@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type {
   AgentDefaultModelLike,
   AgentLike,
@@ -49,13 +48,117 @@ interface AgentHandleLike {
   dispose(): Promise<void>;
 }
 
+interface AgentCreateOptionsLike {
+  sessionId: string;
+  meta?: { agentPreset?: string; origin?: "subagent" };
+  setup?: (agentCtx: ContextLike, agent: AgentLike) => Promise<void> | void;
+}
+
+interface AgentResumeOptionsLike {
+  resumeSessionId: string;
+  setup?: (agentCtx: ContextLike, agent: AgentLike) => Promise<void> | void;
+}
+
 interface AgentRegistryLike {
   list(): AgentLike[];
-  create(options: {
-    sessionId: string;
-    meta?: { agentPreset?: string };
-    setup?: (agentCtx: ContextLike, agent: AgentLike) => Promise<void> | void;
-  }): Promise<AgentHandleLike>;
+  create(options: AgentCreateOptionsLike): Promise<AgentHandleLike>;
+  resume(options: AgentResumeOptionsLike): Promise<AgentHandleLike>;
+}
+
+interface SessionPersistenceLike {
+  stat(sessionId: string): Promise<unknown | undefined>;
+}
+
+/** One durable internal Session, shared by every cold-Preset schema probe. */
+export const TOOL_MANAGER_PROBE_SESSION_ID = "tool-manager-probe-internal-v1";
+
+/**
+ * A single live probe prevents one persistent Session per request or Preset.
+ * Preset switches are serialized because `recompose()` mutates this Agent's
+ * scope parent before its scoped tool catalog is read.
+ */
+export class PresetSchemaProbe {
+  private handle?: AgentHandleLike;
+  private initialization?: Promise<AgentHandleLike | undefined>;
+  private queue: Promise<void> = Promise.resolve();
+  private disposed = false;
+
+  constructor(
+    private readonly context: ContextLike,
+    private readonly presets: AgentPresetsLike,
+  ) {}
+
+  inspect(presetId: string): Promise<ToolSchemaLike[]> {
+    const operation = this.queue.then(
+      () => this.inspectSerial(presetId),
+      () => this.inspectSerial(presetId),
+    );
+    this.queue = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  private async inspectSerial(presetId: string): Promise<ToolSchemaLike[]> {
+    if (this.disposed) return [];
+    const handle = await this.ensure(presetId);
+    if (!handle) return [];
+    if (this.presets.composedPreset(handle.agent.ctx) !== presetId) {
+      await this.presets.recompose(handle.agent.ctx, presetId);
+    }
+    return handle.agent.ctx.get<ToolRuntimeLike>("tools")?.schemas(handle.agent) ?? [];
+  }
+
+  private async ensure(initialPresetId: string): Promise<AgentHandleLike | undefined> {
+    if (this.handle) return this.handle;
+    if (!this.initialization) {
+      this.initialization = this.initialize(initialPresetId).then(async (handle) => {
+        if (!handle) return undefined;
+        if (this.disposed) {
+          await handle.dispose().catch(() => undefined);
+          return undefined;
+        }
+        this.handle = handle;
+        return handle;
+      }).finally(() => {
+        this.initialization = undefined;
+      });
+    }
+    return this.initialization;
+  }
+
+  private async initialize(initialPresetId: string): Promise<AgentHandleLike | undefined> {
+    const agents = this.context.get<AgentRegistryLike>("agents");
+    const persistence = this.context.get<SessionPersistenceLike>("sessionPersistence");
+    if (!agents || !persistence) return undefined;
+
+    const setup = async (agentCtx: ContextLike) => {
+      await this.presets.mount(agentCtx, initialPresetId);
+    };
+    const existing = await persistence.stat(TOOL_MANAGER_PROBE_SESSION_ID);
+    if (existing) {
+      // A broken fixed probe is intentionally not replaced with a random id:
+      // falling back to standing schemas is safer than growing Session storage.
+      return agents.resume({
+        resumeSessionId: TOOL_MANAGER_PROBE_SESSION_ID,
+        setup,
+      });
+    }
+    return agents.create({
+      sessionId: TOOL_MANAGER_PROBE_SESSION_ID,
+      meta: { agentPreset: initialPresetId, origin: "subagent" },
+      setup,
+    });
+  }
+
+  async dispose(): Promise<void> {
+    if (this.disposed) return;
+    this.disposed = true;
+    await this.queue.catch(() => undefined);
+    const pending = this.initialization;
+    const initialized = pending ? await pending.catch(() => undefined) : undefined;
+    const handle = this.handle ?? initialized;
+    this.handle = undefined;
+    if (handle) await handle.dispose().catch(() => undefined);
+  }
 }
 
 export function apply(ctx: unknown): void {
@@ -70,20 +173,21 @@ export function apply(ctx: unknown): void {
   const runtime = new ToolPolicyRuntime(context, presets, config.get());
   runtime.start();
   const observedSchemas = (presetId: string) => runtime.observedSchemasFor(presetId);
-  const probes = new Map<string, Promise<ToolSchemaLike[]>>();
+  const probe = new PresetSchemaProbe(context, presets);
+  const pendingCatalogs = new Map<string, Promise<ToolSchemaLike[]>>();
   const catalogSchemas = async (presetId: string): Promise<ToolSchemaLike[]> => {
     const live = livePresetSchemas(context, presets, presetId);
     if (live) {
       runtime.observeSchemas(presetId, live);
       return live;
     }
-    let pending = probes.get(presetId);
+    let pending = pendingCatalogs.get(presetId);
     if (!pending) {
-      pending = probePresetSchemas(context, presets, presetId).then((schemas) => {
+      pending = probe.inspect(presetId).then((schemas) => {
         runtime.observeSchemas(presetId, schemas);
         return schemas;
-      }).finally(() => probes.delete(presetId));
-      probes.set(presetId, pending);
+      }).finally(() => pendingCatalogs.delete(presetId));
+      pendingCatalogs.set(presetId, pending);
     }
     return pending;
   };
@@ -213,7 +317,10 @@ export function apply(ctx: unknown): void {
     });
   });
 
-  context.effect?.(() => () => runtime.dispose(), "dsh-tool-manager runtime");
+  context.effect?.(() => async () => {
+    await probe.dispose();
+    await runtime.dispose();
+  }, "dsh-tool-manager runtime");
 }
 
 function livePresetSchemas(
@@ -225,29 +332,6 @@ function livePresetSchemas(
   const existing = agents?.list().find((agent) => presets.composedPreset(agent.ctx) === presetId);
   if (!existing) return undefined;
   return existing.ctx.get<ToolRuntimeLike>("tools")?.schemas(existing) ?? [];
-}
-
-async function probePresetSchemas(
-  context: ContextLike,
-  presets: AgentPresetsLike,
-  presetId: string,
-): Promise<ToolSchemaLike[]> {
-  const agents = context.get<AgentRegistryLike>("agents");
-  if (!agents) return [];
-  const sessionId = `tool-manager-probe-${randomUUID()}`;
-  let handle: AgentHandleLike | undefined;
-  try {
-    handle = await agents.create({
-      sessionId,
-      meta: { agentPreset: presetId },
-      setup: async (agentCtx) => {
-        await presets.mount(agentCtx, presetId);
-      },
-    });
-    return handle.agent.ctx.get<ToolRuntimeLike>("tools")?.schemas(handle.agent) ?? [];
-  } finally {
-    await handle?.dispose().catch(() => undefined);
-  }
 }
 
 export async function assertNoEmptyGroups(

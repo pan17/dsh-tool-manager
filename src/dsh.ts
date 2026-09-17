@@ -22,6 +22,8 @@ export interface AgentSessionLike {
 }
 
 export interface AgentLike {
+  /** Shared Agent/Session identity. */
+  id?: string;
   ctx: ContextLike;
   session?: AgentSessionLike;
 }
@@ -76,6 +78,7 @@ export interface AgentPresetsLike {
   compositionInventory(): Promise<PresetCompositionLike[]>;
   standingKeyFor(id: string): Promise<unknown>;
   mount(agentCtx: ContextLike, id: string): Promise<unknown>;
+  recompose(agentCtx: ContextLike, id: string): Promise<unknown>;
 }
 
 export interface PresetCompositionLike {
