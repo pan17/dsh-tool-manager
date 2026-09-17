@@ -1,15 +1,18 @@
+import { randomUUID } from "node:crypto";
 import type {
   AgentDefaultModelLike,
+  AgentLike,
   AgentPresetsLike,
   ContextLike,
   LlmRuntimeLike,
   ToolRuntimeLike,
+  ToolSchemaLike,
 } from "./dsh.js";
 import { asRecord } from "./dsh.js";
 import { ToolManagerConfigStore } from "./config.js";
 import { groupPolicyIssues, normalizeSettings, policyFor } from "./policy.js";
 import { ToolPolicyRuntime } from "./runtime.js";
-import { buildSnapshot } from "./snapshot.js";
+import { buildSnapshot, mergeSchemas } from "./snapshot.js";
 import { DISCOVERY_TOOL_NAME, PTC_TRANSPORT_NAME } from "./types.js";
 import {
   generateAutoGroups,
@@ -41,6 +44,20 @@ interface WebServer {
   }): unknown;
 }
 
+interface AgentHandleLike {
+  agent: AgentLike;
+  dispose(): Promise<void>;
+}
+
+interface AgentRegistryLike {
+  list(): AgentLike[];
+  create(options: {
+    sessionId: string;
+    meta?: { agentPreset?: string };
+    setup?: (agentCtx: ContextLike, agent: AgentLike) => Promise<void> | void;
+  }): Promise<AgentHandleLike>;
+}
+
 export function apply(ctx: unknown): void {
   const context = ctx as ContextLike;
   const presets = context.get<AgentPresetsLike>("agentPresets");
@@ -52,6 +69,28 @@ export function apply(ctx: unknown): void {
   const config = new ToolManagerConfigStore();
   const runtime = new ToolPolicyRuntime(context, presets, config.get());
   runtime.start();
+  const observedSchemas = (presetId: string) => runtime.observedSchemasFor(presetId);
+  const probes = new Map<string, Promise<ToolSchemaLike[]>>();
+  const catalogSchemas = async (presetId: string): Promise<ToolSchemaLike[]> => {
+    const live = livePresetSchemas(context, presets, presetId);
+    if (live) {
+      runtime.observeSchemas(presetId, live);
+      return live;
+    }
+    let pending = probes.get(presetId);
+    if (!pending) {
+      pending = probePresetSchemas(context, presets, presetId).then((schemas) => {
+        runtime.observeSchemas(presetId, schemas);
+        return schemas;
+      }).finally(() => probes.delete(presetId));
+      probes.set(presetId, pending);
+    }
+    return pending;
+  };
+  const ensureAllPresetSchemas = async (): Promise<void> => {
+    const inventory = await presets.compositionInventory();
+    await Promise.all(inventory.filter((item) => !item.broken).map((item) => catalogSchemas(item.id)));
+  };
 
   context.inject?.(["webServer"], (webCtx) => {
     const webServer = webCtx.get<WebServer>("webServer");
@@ -65,7 +104,9 @@ export function apply(ctx: unknown): void {
           sendJson(res, 405, { ok: false, message: "method not allowed" });
           return;
         }
-        void buildSnapshot(presets, tools, config.get(), config.revision, config.path).then(
+        void ensureAllPresetSchemas().then(
+          () => buildSnapshot(presets, tools, config.get(), config.revision, config.path, observedSchemas),
+        ).then(
           (snapshot) => sendJson(res, 200, snapshot),
           (error) => sendJson(res, 500, { ok: false, message: errorMessage(error) }),
         );
@@ -92,7 +133,7 @@ export function apply(ctx: unknown): void {
           const inventory = await presets.compositionInventory();
           if (!inventory.some((item) => item.id === presetId)) throw new Error(`unknown preset ${JSON.stringify(presetId)}`);
           const key = await presets.standingKeyFor(presetId);
-          const schemas = tools.schemas(key)
+          const schemas = mergeSchemas(tools.schemas(key), await catalogSchemas(presetId))
             .filter((schema) => schema.name !== DISCOVERY_TOOL_NAME && schema.name !== PTC_TRANSPORT_NAME);
           const selected = selectSuggestionTools(schemas, body?.toolNames);
           const otherGroupNames = normalizeGroupNames(body?.otherGroupNames);
@@ -129,7 +170,7 @@ export function apply(ctx: unknown): void {
           const inventory = await presets.compositionInventory();
           if (!inventory.some((item) => item.id === presetId)) throw new Error(`unknown preset ${JSON.stringify(presetId)}`);
           const key = await presets.standingKeyFor(presetId);
-          const schemas = tools.schemas(key)
+          const schemas = mergeSchemas(tools.schemas(key), await catalogSchemas(presetId))
             .filter((schema) => schema.name !== DISCOVERY_TOOL_NAME && schema.name !== PTC_TRANSPORT_NAME);
           const selected = selectSuggestionTools(schemas, body?.toolNames);
           const otherGroupNames = normalizeGroupNames(body?.otherGroupNames);
@@ -163,7 +204,7 @@ export function apply(ctx: unknown): void {
           await assertNoEmptyGroups(presets, tools, next);
           await config.replace(next, expectedRevision);
           runtime.update(config.get());
-          return buildSnapshot(presets, tools, config.get(), config.revision, config.path);
+          return buildSnapshot(presets, tools, config.get(), config.revision, config.path, observedSchemas);
         })().then(
           (snapshot) => sendJson(res, 200, snapshot),
           (error) => sendJson(res, 400, { ok: false, message: errorMessage(error) }),
@@ -173,6 +214,40 @@ export function apply(ctx: unknown): void {
   });
 
   context.effect?.(() => () => runtime.dispose(), "dsh-tool-manager runtime");
+}
+
+function livePresetSchemas(
+  context: ContextLike,
+  presets: AgentPresetsLike,
+  presetId: string,
+): ToolSchemaLike[] | undefined {
+  const agents = context.get<AgentRegistryLike>("agents");
+  const existing = agents?.list().find((agent) => presets.composedPreset(agent.ctx) === presetId);
+  if (!existing) return undefined;
+  return existing.ctx.get<ToolRuntimeLike>("tools")?.schemas(existing) ?? [];
+}
+
+async function probePresetSchemas(
+  context: ContextLike,
+  presets: AgentPresetsLike,
+  presetId: string,
+): Promise<ToolSchemaLike[]> {
+  const agents = context.get<AgentRegistryLike>("agents");
+  if (!agents) return [];
+  const sessionId = `tool-manager-probe-${randomUUID()}`;
+  let handle: AgentHandleLike | undefined;
+  try {
+    handle = await agents.create({
+      sessionId,
+      meta: { agentPreset: presetId },
+      setup: async (agentCtx) => {
+        await presets.mount(agentCtx, presetId);
+      },
+    });
+    return handle.agent.ctx.get<ToolRuntimeLike>("tools")?.schemas(handle.agent) ?? [];
+  } finally {
+    await handle?.dispose().catch(() => undefined);
+  }
 }
 
 export async function assertNoEmptyGroups(

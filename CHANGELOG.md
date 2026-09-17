@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-10-22
+
+### Fixed
+
+- 修复仅在 Agent 自身作用域注册的工具（如启用 `modelSelectionSettings` 后动态注入的 `subagent`）在工具管理页面无法显示、无法关闭的问题：现在通过运行中 Agent 的真实工具目录与必要时对空闲 Preset 临时挂载探测 Agent 来补齐页面目录，不再依赖工具名硬编码。
+- 修复关闭 Agent 本地作用域注册的工具后，模型请求仍然能看到该工具并附带 `tool:<name>` 提示词段的问题：在 `system-prompt/assemble` 阶段过滤 `assembly.tools` 与对应提示词段，并安装 `tools.guard()` 拒绝执行已关闭工具，与原有 `tools.restrict()` 形成三层防护。
+- 自动命名与自动分组的可用工具目录也同步使用相同合并策略，避免页面能关闭的工具在生成接口中找不到。
+
 ## [1.2.2] - 2026-09-17
 
 ### Changed

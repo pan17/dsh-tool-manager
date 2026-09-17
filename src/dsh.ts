@@ -36,6 +36,7 @@ export interface ToolRuntimeLike {
   schemas(scope?: unknown): ToolSchemaLike[];
   register(definition: unknown): () => void;
   restrict(filter: { deny: string[] }): () => void;
+  guard?(guard: (execution: { name: string }) => string | undefined): () => void;
 }
 
 export interface ModelSelectionLike {
@@ -74,6 +75,7 @@ export interface AgentPresetsLike {
   composedPreset(agentCtx: ContextLike): string | undefined;
   compositionInventory(): Promise<PresetCompositionLike[]>;
   standingKeyFor(id: string): Promise<unknown>;
+  mount(agentCtx: ContextLike, id: string): Promise<unknown>;
 }
 
 export interface PresetCompositionLike {

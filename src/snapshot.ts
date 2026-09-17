@@ -15,6 +15,7 @@ export async function buildSnapshot(
   settings: ToolManagerSettings,
   revision: number,
   configPath: string,
+  observedSchemas?: (presetId: string) => readonly ToolSchemaView[],
 ): Promise<ToolManagerSnapshot> {
   const compositions = await presets.compositionInventory();
   const views: PresetCatalogView[] = [];
@@ -25,7 +26,9 @@ export async function buildSnapshot(
     if (!broken) {
       try {
         const key = await presets.standingKeyFor(composition.id);
-        schemas = tools.schemas(key)
+        const standing = tools.schemas(key);
+        const observed = observedSchemas?.(composition.id) ?? [];
+        schemas = mergeSchemas(standing, observed)
           .filter((schema) => schema.name !== DISCOVERY_TOOL_NAME && schema.name !== PTC_TRANSPORT_NAME)
           .map(projectSchema);
       } catch (error) {
@@ -53,6 +56,16 @@ export async function buildSnapshot(
     configPath,
     presets: views,
   };
+}
+
+export function mergeSchemas<T extends { name: string }>(
+  standing: readonly T[],
+  observed: readonly T[],
+): T[] {
+  const merged = new Map<string, T>();
+  for (const schema of standing) merged.set(schema.name, schema);
+  for (const schema of observed) merged.set(schema.name, schema);
+  return [...merged.values()];
 }
 
 function projectSchema(schema: {

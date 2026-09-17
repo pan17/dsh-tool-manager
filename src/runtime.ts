@@ -3,6 +3,7 @@ import type {
   AgentPresetsLike,
   ContextLike,
   ToolRuntimeLike,
+  ToolSchemaLike,
 } from "./dsh.js";
 import {
   applyCatalogDecision,
@@ -28,13 +29,17 @@ import {
 interface AgentState {
   readonly agent: AgentLike;
   baseline: string[];
+  baselineSchemas: ToolSchemaLike[];
   restriction?: () => void;
+  guard?: () => void;
+  assemblyFilter?: () => void;
   readonly exposures: Set<string>;
 }
 
 export class ToolPolicyRuntime {
   private settings: ToolManagerSettings;
   private readonly states = new Map<AgentLike, AgentState>();
+  private readonly observedSchemas = new Map<string, Map<string, ToolSchemaLike>>();
   private mutating = false;
   private refreshQueued = false;
   private discoveryDisposer?: () => void;
@@ -82,7 +87,8 @@ export class ToolPolicyRuntime {
     if (this.states.has(agent)) return;
     if (!agent.ctx.get("tools")) return;
 
-    const baseline = this.inheritedNames(agent);
+    const baselineSchemas = this.inheritedSchemas(agent);
+    const baseline = baselineSchemas.map((schema) => schema.name);
     const groups = resolveActiveGroups(this.policy(agent), baseline);
     const restored = restoredExposureNames(agent.session);
     const exposures = new Set<string>();
@@ -93,9 +99,12 @@ export class ToolPolicyRuntime {
     const state: AgentState = {
       agent,
       baseline,
+      baselineSchemas,
       exposures,
     };
     this.states.set(agent, state);
+    this.observe(state);
+    this.installLocalPolicy(state);
     this.reconcile(state);
   }
 
@@ -106,6 +115,8 @@ export class ToolPolicyRuntime {
     this.mutating = true;
     try {
       state.restriction?.();
+      state.guard?.();
+      state.assemblyFilter?.();
     } finally {
       this.mutating = false;
     }
@@ -123,12 +134,55 @@ export class ToolPolicyRuntime {
     return this.ctx.get<ToolRuntimeLike>("tools");
   }
 
-  private inheritedNames(agent: AgentLike): string[] {
+  private inheritedSchemas(agent: AgentLike): ToolSchemaLike[] {
     const scopedTools = agent.ctx.get<ToolRuntimeLike>("tools");
     if (!scopedTools) return [];
-    return scopedTools
-      .schemas(agent)
-      .map((schema) => schema.name);
+    return scopedTools.schemas(agent);
+  }
+
+  private observe(state: AgentState): void {
+    const presetId = this.presetId(state.agent);
+    if (!presetId) return;
+    this.observeSchemas(presetId, state.baselineSchemas);
+  }
+
+  observeSchemas(presetId: string, schemasToAdd: readonly ToolSchemaLike[]): void {
+    let schemas = this.observedSchemas.get(presetId);
+    if (!schemas) {
+      schemas = new Map();
+      this.observedSchemas.set(presetId, schemas);
+    }
+    for (const schema of schemasToAdd) schemas.set(schema.name, schema);
+  }
+
+  observedSchemasFor(presetId: string): ToolSchemaLike[] {
+    return [...(this.observedSchemas.get(presetId)?.values() ?? [])];
+  }
+
+  private installLocalPolicy(state: AgentState): void {
+    const scopedTools = state.agent.ctx.get<ToolRuntimeLike>("tools");
+    state.guard = scopedTools?.guard?.((execution) => {
+      const hidden = denyNames(this.policy(state.agent), state.baseline, state.exposures);
+      return hidden.includes(execution.name)
+        ? `tool ${JSON.stringify(execution.name)} is disabled by the tool-manager policy for this Agent preset`
+        : undefined;
+    });
+    state.assemblyFilter = state.agent.ctx.on("system-prompt/assemble", async (...args: unknown[]) => {
+      const next = args.at(-1);
+      if (typeof next !== "function") return args[0];
+      const assembly = await (next as () => Promise<unknown>)();
+      if (!isPromptAssembly(assembly)) return assembly;
+      const hidden = new Set(denyNames(this.policy(state.agent), state.baseline, state.exposures));
+      if (hidden.size === 0) return assembly;
+      return {
+        ...assembly,
+        tools: assembly.tools.filter((schema) => !hidden.has(schema.name)),
+        sections: assembly.sections.filter((section) => {
+          const toolName = section.name.startsWith("tool:") ? section.name.slice("tool:".length) : undefined;
+          return toolName === undefined || !hidden.has(toolName);
+        }),
+      };
+    }) as (() => void) | undefined;
   }
 
   private queueBaselineRefresh(): void {
@@ -146,8 +200,11 @@ export class ToolPolicyRuntime {
       for (const state of this.states.values()) {
         state.restriction?.();
         state.restriction = undefined;
-        const next = this.inheritedNames(state.agent);
+        const nextSchemas = this.inheritedSchemas(state.agent);
+        const next = nextSchemas.map((schema) => schema.name);
+        state.baselineSchemas = nextSchemas;
         if (!sameNames(state.baseline, next)) state.baseline = next;
+        this.observe(state);
       }
     } finally {
       this.mutating = false;
@@ -318,6 +375,16 @@ function isEnterDecision(value: unknown): value is { kind: "enter"; messages: un
   if (value === null || typeof value !== "object") return false;
   const record = value as { kind?: unknown; messages?: unknown };
   return record.kind === "enter" && Array.isArray(record.messages);
+}
+
+function isPromptAssembly(value: unknown): value is {
+  tools: ToolSchemaLike[];
+  sections: Array<{ name: string; [key: string]: unknown }>;
+  [key: string]: unknown;
+} {
+  if (value === null || typeof value !== "object") return false;
+  const record = value as { tools?: unknown; sections?: unknown };
+  return Array.isArray(record.tools) && Array.isArray(record.sections);
 }
 
 function errorMessage(error: unknown): string {
