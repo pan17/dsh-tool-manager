@@ -15,6 +15,8 @@ export interface SessionEventLike {
 
 export interface AgentSessionLike {
   seq: number;
+  /** Fork-inherited prefix; restored Sessions keep the original fork boundary. */
+  inheritedEventCount?: number;
   surface?: { nodes?: readonly number[] };
   eventAt(seq: number): SessionEventLike | undefined;
 }

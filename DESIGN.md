@@ -54,8 +54,9 @@ Agent loop 在 `preStep()` 中**先** `systemPrompt.assemble()`，**再**跑 `ag
 一个 Preset composition 被 standing mount 一次，多个 Agent 通过 scope parent 加入。因此：
 
 - **静态 preset 规则**可以放在 standing scope；
-- **按会话临时曝光状态**必须放在 Agent 自己的 scope；
-- `tool_list` 注册在 host 全局层（否则 PTC 生成 SDK 看不到），每个 live Agent 只维护该会话的打开状态，避免同 Preset 会话互相解锁。
+- **按会话临时曝光状态**必须应用在 Agent 自己的 scope；
+- `tool_list` 注册在 host 全局层（否则 PTC 生成 SDK 看不到），每个 live Agent 只维护该会话的打开状态，避免同 Preset 会话互相解锁；
+- Agent 安装时从该 Session 的持久事件日志恢复成功的 `tool_list` 调用，因此重启 DSH 并恢复同一 Session 后仍保持开放。原生调用通过成功配对的 `tool/call` + `tool/result` 恢复，PTC 调用通过成功的 `tool/ptc-dispatch` 恢复；fork 时跳过 `inheritedEventCount` 前缀，避免把父 Session 的临时开放状态带入子 Session。
 
 ### 2.5 Preset inventory 已有只读基础，但没有写 API
 
@@ -116,7 +117,7 @@ interface ToolManagerSettings {
 ### 3.3 `tool_list` 语义
 
 - `tool_list({ group: "GitHub MCP" })`：按名称打开该组，该组全部工具立刻可用，直到当前 Agent 结束或该组被删掉；
-- 每个 Agent 独立维护打开状态，不跨会话共享；
+- 每个 Agent 独立应用打开状态，不跨会话共享；成功调用由 Session 事件日志持久记录，同一 Session 重启恢复时重建状态；
 - `tool_list` 注册在 host 全局层，这样 PTC 生成 SDK 能绑定它；没有按需组的 Preset 用 restriction 隐藏；
 - PTC 模式应在 `run_code` 内调用 `await tools.tool_list({ group })`；
 - 按需组说明不走 `systemPrompt.section`。所有 Preset（含极简模式的 `complete: true` persona）都在 `agent/pre-step` 写入一条 skill 式的持久 user 角色 `<system-reminder>` 目录；目录为每组列出实际工具数量和完整工具名；
@@ -224,7 +225,7 @@ DSH 内置文件/Web 等工具 guidance 会通过 `ctx.tools.get(name, scope)` �
 1. 监听 `tools/change`，MCP 动态 tools/list 或插件 HMR 后刷新每个 Agent baseline；
 2. 设置页提示并一键清除 orphan disable；旧配置中的空组在草稿中标记为无效，必须补选工具或删除后才能保存；
 3. `tool_list` 支持 `query`，大组只返回 preview + 截断列表；
-4. 打开后的组在当前会话一直可用；策略更新不取消正在执行的工具；
+4. 打开后的组在当前会话一直可用，重启恢复同一 Session 时从成功的原生/PTC 工具事件重建；fork 不继承父 Session 的开放状态；策略更新不取消正在执行的工具；
 5. 自动命名和自动分组在执行前显示确认框，并允许配置 5–600 秒请求超时（默认 60/120 秒）；Host 校验范围，超时及供应商中止会返回明确错误。
 
 仍待：

@@ -9,6 +9,7 @@ import {
   catalogEntriesFromGroups,
   catalogHistory,
 } from "./catalog.js";
+import { restoredExposureNames } from "./exposure-history.js";
 import {
   denyNames,
   findGroup,
@@ -81,10 +82,18 @@ export class ToolPolicyRuntime {
     if (this.states.has(agent)) return;
     if (!agent.ctx.get("tools")) return;
 
+    const baseline = this.inheritedNames(agent);
+    const groups = resolveActiveGroups(this.policy(agent), baseline);
+    const restored = restoredExposureNames(agent.session);
+    const exposures = new Set<string>();
+    for (const name of restored) {
+      const group = findGroup(groups, name);
+      if (group) exposures.add(group.name);
+    }
     const state: AgentState = {
       agent,
-      baseline: this.inheritedNames(agent),
-      exposures: new Set(),
+      baseline,
+      exposures,
     };
     this.states.set(agent, state);
     this.reconcile(state);

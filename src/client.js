@@ -846,7 +846,7 @@ window.__ModuleLoader__.load({
 
 			return h("div", { className: "tm_root" },
 				h("div", { className: "tm_head" },
-					h("div", null, h("h2", null, "Agent 工具管理"), h("div", { className: "tm_muted" }, "按每个 Agent 预设开关工具。点「分组」把不常用的收进按需组：平时模型看不到，需要时先查目录再打开。")),
+					h("div", null, h("h2", null, "Agent 工具管理"), h("div", { className: "tm_muted" }, "按每个 Agent 预设开关工具。点「手动分组」把不常用的收进按需组：平时模型看不到，需要时先查目录再打开。")),
 					h("div", { className: "tm_row" },
 						h("button", { className: "tm_btn", onClick: reload, disabled: busy || autoGrouping }, "刷新"),
 						h("button", { className: "tm_btn primary", onClick: save, disabled: busy || autoGrouping || !draft.writable || !dirty }, busy ? "处理中…" : "保存"),
@@ -876,7 +876,7 @@ window.__ModuleLoader__.load({
 						h("div", null, h("b", null, "工具目录"), h("div", { className: "tm_muted" }, "关掉后立刻对模型隐藏。按需组默认隐藏，模型要先调用 tool_list 才能使用。")),
 						h("div", { className: "tm_row" },
 							h("button", { className: "tm_btn", onClick: startAutoGroup, disabled: autoGrouping || autoGroupCandidates.length === 0, title: autoGroupCandidates.length ? "用默认模型对未分组且未关闭的工具进行聚类" : "没有可自动分组的工具" }, autoGrouping ? "自动分组中…" : "自动分组"),
-							h("button", { className: "tm_btn", onClick: openCreate, disabled: autoGrouping }, "分组"),
+							h("button", { className: "tm_btn", onClick: openCreate, disabled: autoGrouping }, "手动分组"),
 						),
 					),
 					h("div", { className: "tm_stats" },
