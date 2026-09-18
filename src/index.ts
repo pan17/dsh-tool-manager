@@ -252,26 +252,35 @@ export interface PresetCatalogOptions {
  */
 export function createPresetCatalog(options: PresetCatalogOptions): PresetCatalog {
   const { context, presets, probe, defaultPreset, observed } = options;
-  const probedSchemas = new Map<string, ToolSchemaLike[]>();
+  // Tool registries emit their change edge before every Agent-scoped plugin has
+  // necessarily finished reconciling. A settings-page request can therefore
+  // sample a live Agent while one or more dynamic tools are in that transient
+  // gap. Keep the union of completed live/probe observations so a later short
+  // sample cannot make a real tool alternate between present and orphaned.
+  const catalogedSchemas = new Map<string, ToolSchemaLike[]>();
   const pendingCatalogs = new Map<string, Promise<ToolSchemaLike[]>>();
+
+  const remember = (presetId: string, schemas: readonly ToolSchemaLike[]): ToolSchemaLike[] => {
+    const merged = mergeSchemas(catalogedSchemas.get(presetId) ?? [], schemas);
+    catalogedSchemas.set(presetId, merged);
+    return merged;
+  };
 
   const catalogSchemas = async (presetId: string): Promise<ToolSchemaLike[]> => {
     const live = livePresetSchemas(context, presets, presetId);
-    if (live) return live;
+    if (live) return remember(presetId, live);
     await defaultPreset.ensure();
     let pending = pendingCatalogs.get(presetId);
     if (!pending) {
-      pending = probe.inspect(presetId).then((schemas) => {
-        probedSchemas.set(presetId, schemas);
-        return schemas;
-      }).finally(() => pendingCatalogs.delete(presetId));
+      pending = probe.inspect(presetId).then((schemas) => remember(presetId, schemas))
+        .finally(() => pendingCatalogs.delete(presetId));
       pendingCatalogs.set(presetId, pending);
     }
     return pending;
   };
 
   return {
-    schemasFor: (presetId) => mergeSchemas(observed(presetId), probedSchemas.get(presetId) ?? []),
+    schemasFor: (presetId) => mergeSchemas(catalogedSchemas.get(presetId) ?? [], observed(presetId)),
     ensureAll: async () => {
       const inventory = await presets.compositionInventory();
       await Promise.all(inventory.filter((item) => !item.broken).map((item) => catalogSchemas(item.id)));

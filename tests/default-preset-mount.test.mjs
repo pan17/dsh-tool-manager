@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { apply, createPresetCatalog, DefaultPresetMount } from "../dist/index.js";
+import { policyOrphans } from "../dist/policy.js";
 
 // The plugin reads its policy store on load; keep that read away from the
 // developer's real configuration.
@@ -184,6 +185,80 @@ describe("session default preset composition order", () => {
     await catalog.ensureAll();
 
     assert.deepEqual(catalog.schemasFor("standard").map((item) => item.name), ["pwsh"]);
+  });
+
+  it("keeps the live catalog stable across a transient scoped-tool gap", async () => {
+    let liveSchemas = [
+      schema("pwsh"),
+      { ...schema("subagent"), description: "first delegation schema" },
+      schema("list_subagent_models"),
+    ];
+    const live = { schemas: () => liveSchemas };
+    const agent = {
+      ctx: {
+        get(name) {
+          return name === "tools" ? live : undefined;
+        },
+      },
+    };
+    const presets = {
+      composedPreset: () => "standard",
+      async compositionInventory() {
+        return [{ id: "standard", trust: "system", isDefault: true }];
+      },
+    };
+    const catalog = createPresetCatalog({
+      context: {
+        get(name) {
+          return name === "agents" ? { list: () => [agent] } : undefined;
+        },
+      },
+      presets,
+      probe: { inspect: async () => { throw new Error("must not probe a live preset"); } },
+      defaultPreset: new DefaultPresetMount({
+        standingKeyFor: async () => { throw new Error("must not compose for a live preset"); },
+      }, () => {}),
+      observed: () => [],
+    });
+
+    await catalog.ensureAll();
+    assert.deepEqual(catalog.schemasFor("standard").map((item) => item.name), [
+      "pwsh",
+      "subagent",
+      "list_subagent_models",
+    ]);
+
+    liveSchemas = [schema("pwsh")];
+    await catalog.ensureAll();
+    const duringGap = catalog.schemasFor("standard");
+    assert.deepEqual(duringGap.map((item) => item.name), [
+      "pwsh",
+      "subagent",
+      "list_subagent_models",
+    ]);
+    assert.deepEqual(
+      policyOrphans(
+        { disabled: ["subagent", "list_subagent_models"], groups: [] },
+        duringGap.map((item) => item.name),
+      ).disabled,
+      [],
+    );
+
+    liveSchemas = [
+      schema("pwsh"),
+      { ...schema("subagent"), description: "updated delegation schema" },
+      schema("list_subagent_models"),
+      schema("new_dynamic_tool"),
+    ];
+    await catalog.ensureAll();
+    const stable = catalog.schemasFor("standard");
+    assert.deepEqual(stable.map((item) => item.name), [
+      "pwsh",
+      "subagent",
+      "list_subagent_models",
+      "new_dynamic_tool",
+    ]);
+    assert.equal(stable.find((item) => item.name === "subagent").description, "updated delegation schema");
   });
 
   it("composes the default as soon as the plugin loads, before any page request", async () => {
