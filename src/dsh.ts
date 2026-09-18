@@ -76,9 +76,17 @@ export interface LlmRuntimeLike {
 export interface AgentPresetsLike {
   composedPreset(agentCtx: ContextLike): string | undefined;
   compositionInventory(): Promise<PresetCompositionLike[]>;
-  standingKeyFor(id: string): Promise<unknown>;
+  /** Absent id resolves the configured default preset. */
+  standingKeyFor(id?: string): Promise<unknown>;
   mount(agentCtx: ContextLike, id: string): Promise<unknown>;
   recompose(agentCtx: ContextLike, id: string): Promise<unknown>;
+}
+
+export interface PresetCompositionRowLike {
+  entryId?: string | null;
+  moduleName?: string;
+  enabled?: unknown;
+  fiberState?: unknown;
 }
 
 export interface PresetCompositionLike {
@@ -87,6 +95,8 @@ export interface PresetCompositionLike {
   trust: "system" | "user";
   isDefault: boolean;
   broken?: string;
+  /** Mounted composition rows; the re-calibration transit is picked by row count. */
+  rows?: readonly PresetCompositionRowLike[];
 }
 
 export interface AgentsLike {

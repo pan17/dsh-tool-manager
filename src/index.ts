@@ -8,11 +8,16 @@ import type {
   ToolSchemaLike,
 } from "./dsh.js";
 import { asRecord } from "./dsh.js";
+import { CompositionWatch } from "./composition-watch.js";
 import { ToolManagerConfigStore } from "./config.js";
-import { groupPolicyIssues, normalizeSettings, policyFor } from "./policy.js";
+import { groupPolicyIssues, matchesAnyPattern, normalizeSettings, policyFor } from "./policy.js";
 import { ToolPolicyRuntime } from "./runtime.js";
 import { buildSnapshot, mergeSchemas } from "./snapshot.js";
-import { DISCOVERY_TOOL_NAME, PTC_TRANSPORT_NAME } from "./types.js";
+import {
+  DISCOVERY_TOOL_NAME,
+  PTC_TRANSPORT_NAME,
+  TOOL_MANAGER_PROBE_SESSION_ID,
+} from "./types.js";
 import {
   generateAutoGroups,
   generateGroupSuggestion,
@@ -69,9 +74,6 @@ interface SessionPersistenceLike {
   stat(sessionId: string): Promise<unknown | undefined>;
 }
 
-/** One durable internal Session, shared by every cold-Preset schema probe. */
-export const TOOL_MANAGER_PROBE_SESSION_ID = "tool-manager-probe-internal-v1";
-
 /**
  * A single live probe prevents one persistent Session per request or Preset.
  * Preset switches are serialized because `recompose()` mutates this Agent's
@@ -103,6 +105,11 @@ export class PresetSchemaProbe {
     if (!handle) return [];
     if (this.presets.composedPreset(handle.agent.ctx) !== presetId) {
       await this.presets.recompose(handle.agent.ctx, presetId);
+      // Dynamic preset plugins reconcile Agent-scoped registrations from the
+      // tools/change event emitted by recompose(). Some disposals complete on
+      // the next event-loop turn, so reading immediately can leak the previous
+      // Preset's scoped tools into this catalog result.
+      await nextEventLoopTurn();
     }
     return handle.agent.ctx.get<ToolRuntimeLike>("tools")?.schemas(handle.agent) ?? [];
   }
@@ -161,6 +168,117 @@ export class PresetSchemaProbe {
   }
 }
 
+/**
+ * The session-default preset's standing composition, composed before any other
+ * preset this plugin mounts.
+ *
+ * `agentPresets` keeps ONE permanent standing composition per preset, and each
+ * composition reconciles its own per-Agent tool registrations on every
+ * `tools/change`. A blank Session is always composed from the deployment's
+ * default preset and only then re-linked to the preset the mode picker names,
+ * so that single switch dispatches one `tools/change` at which listeners run in
+ * composition-mount order: the preset mounted FIRST disposes its per-Agent
+ * registrations before the preset mounted SECOND claims the same tool names.
+ *
+ * Presets that install per-Agent tools — `modelSelectionSettings: true` on
+ * `@deepseek-ai/dsh-tool-subagent` registers `subagent` and
+ * `list_subagent_models` into the Agent's OWN scope layer — therefore lose
+ * those tools on a default→preset switch whenever a non-default preset was
+ * mounted first: a Session resumed in it, or this plugin's own catalog probe.
+ * The tools stay missing for that Agent until it is rebuilt.
+ *
+ * Composing the default at plugin start pins the order to `[default, …]` for
+ * the whole Host run, which is the order such a switch needs; every preset this
+ * plugin mounts afterwards goes through {@link ensure} first. A failed attempt
+ * is a warning, never a blocked catalog: the probe still answers from whatever
+ * presets it can compose, and the next call retries.
+ */
+export class DefaultPresetMount {
+  private attempt?: Promise<void>;
+  private ready = false;
+
+  constructor(
+    private readonly presets: AgentPresetsLike,
+    private readonly warn: (message: string) => void,
+  ) {}
+
+  /**
+   * Resolve once the default preset's standing composition exists, once its
+   * composing attempt settled, or immediately when it already did.
+   */
+  async ensure(): Promise<void> {
+    if (this.ready) return;
+    this.attempt ??= this.compose();
+    await this.attempt;
+  }
+
+  private async compose(): Promise<void> {
+    try {
+      await this.presets.standingKeyFor(undefined);
+      this.ready = true;
+    } catch (error) {
+      this.warn(`tool-manager could not compose the default agent preset before other presets: ${errorMessage(error)}`);
+    } finally {
+      this.attempt = undefined;
+    }
+  }
+}
+
+/** Lazily probed catalogs plus the observer-visible schemas of one Preset. */
+export interface PresetCatalog {
+  /** Every schema known for one Preset, for the page's per-Preset catalog. */
+  schemasFor(presetId: string): ToolSchemaLike[];
+  /** Probe every Preset the roster supplies, so the page can list all of them. */
+  ensureAll(): Promise<void>;
+}
+
+export interface PresetCatalogOptions {
+  context: ContextLike;
+  presets: AgentPresetsLike;
+  probe: PresetSchemaProbe;
+  defaultPreset: DefaultPresetMount;
+  /** Schemas observed on live Agents of one Preset, without probing. */
+  observed: (presetId: string) => readonly ToolSchemaLike[];
+}
+
+/**
+ * Build the per-Preset catalog readers shared by the snapshot and save paths.
+ *
+ * A Preset with a live Agent answers from that Agent, so probing — and the
+ * mount it needs — is skipped where the live view is authoritative. Every cold
+ * Preset is probed only after the session default is composed (see
+ * {@link DefaultPresetMount}), which is what keeps the mount order that mode
+ * switching depends on.
+ */
+export function createPresetCatalog(options: PresetCatalogOptions): PresetCatalog {
+  const { context, presets, probe, defaultPreset, observed } = options;
+  const probedSchemas = new Map<string, ToolSchemaLike[]>();
+  const pendingCatalogs = new Map<string, Promise<ToolSchemaLike[]>>();
+
+  const catalogSchemas = async (presetId: string): Promise<ToolSchemaLike[]> => {
+    const live = livePresetSchemas(context, presets, presetId);
+    if (live) return live;
+    await defaultPreset.ensure();
+    let pending = pendingCatalogs.get(presetId);
+    if (!pending) {
+      pending = probe.inspect(presetId).then((schemas) => {
+        probedSchemas.set(presetId, schemas);
+        return schemas;
+      }).finally(() => pendingCatalogs.delete(presetId));
+      pendingCatalogs.set(presetId, pending);
+    }
+    return pending;
+  };
+
+  return {
+    schemasFor: (presetId) => mergeSchemas(observed(presetId), probedSchemas.get(presetId) ?? []),
+    ensureAll: async () => {
+      const inventory = await presets.compositionInventory();
+      await Promise.all(inventory.filter((item) => !item.broken).map((item) => catalogSchemas(item.id)));
+    },
+  };
+}
+
 export function apply(ctx: unknown): void {
   const context = ctx as ContextLike;
   const presets = context.get<AgentPresetsLike>("agentPresets");
@@ -172,29 +290,44 @@ export function apply(ctx: unknown): void {
   const config = new ToolManagerConfigStore();
   const runtime = new ToolPolicyRuntime(context, presets, config.get());
   runtime.start();
-  const observedSchemas = (presetId: string) => runtime.observedSchemasFor(presetId);
   const probe = new PresetSchemaProbe(context, presets);
-  const pendingCatalogs = new Map<string, Promise<ToolSchemaLike[]>>();
-  const catalogSchemas = async (presetId: string): Promise<ToolSchemaLike[]> => {
-    const live = livePresetSchemas(context, presets, presetId);
-    if (live) {
-      runtime.observeSchemas(presetId, live);
-      return live;
-    }
-    let pending = pendingCatalogs.get(presetId);
-    if (!pending) {
-      pending = probe.inspect(presetId).then((schemas) => {
-        runtime.observeSchemas(presetId, schemas);
-        return schemas;
-      }).finally(() => pendingCatalogs.delete(presetId));
-      pendingCatalogs.set(presetId, pending);
-    }
-    return pending;
-  };
-  const ensureAllPresetSchemas = async (): Promise<void> => {
-    const inventory = await presets.compositionInventory();
-    await Promise.all(inventory.filter((item) => !item.broken).map((item) => catalogSchemas(item.id)));
-  };
+  const defaultPreset = new DefaultPresetMount(presets, (message) => warn(context, message));
+  // Compose the default preset now, not on the first page load: the composition
+  // mounted first owns the reconciliation order every later mode switch needs,
+  // and a Session resumed in another preset would otherwise take that place.
+  void defaultPreset.ensure();
+  const catalog = createPresetCatalog({
+    context,
+    presets,
+    probe,
+    defaultPreset,
+    observed: (presetId) => runtime.observedSchemasFor(presetId),
+  });
+  const ensureAllPresetSchemas = (): Promise<void> => catalog.ensureAll();
+
+  // Mount order is a best-effort prediction of DSH's per-Agent reconciliation
+  // race; this watch is the part that does not depend on winning it. It
+  // re-calibrates any Session whose mode changed, whatever plugin lost the race
+  // for which tool names (see composition-watch.ts).
+  const compositionWatch = new CompositionWatch({
+    presets,
+    agents: () => context.get<AgentRegistryLike>("agents")?.list() ?? [],
+    tools: () => tools,
+    probe: (presetId) => probe.inspect(presetId),
+    explainedLoss: (presetId, toolName) => {
+      // This plugin's own tools, plus every name its policy hides on purpose:
+      // a group that closed or a tool the user disabled is not a lost
+      // registration, and reporting it would be a false alarm.
+      if (toolName === DISCOVERY_TOOL_NAME || toolName === PTC_TRANSPORT_NAME) return true;
+      const policy = policyFor(config.get(), presetId);
+      if (policy.disabled.includes(toolName)) return true;
+      return policy.groups.some((group) => matchesAnyPattern(toolName, group.patterns));
+    },
+    excludeAgentId: TOOL_MANAGER_PROBE_SESSION_ID,
+    warn: (message) => warn(context, message),
+    info: (message) => info(context, message),
+  });
+  compositionWatch.start(context);
 
   context.inject?.(["webServer"], (webCtx) => {
     const webServer = webCtx.get<WebServer>("webServer");
@@ -209,7 +342,7 @@ export function apply(ctx: unknown): void {
           return;
         }
         void ensureAllPresetSchemas().then(
-          () => buildSnapshot(presets, tools, config.get(), config.revision, config.path, observedSchemas),
+          () => buildSnapshot(presets, tools, config.get(), config.revision, config.path, catalog.schemasFor),
         ).then(
           (snapshot) => sendJson(res, 200, snapshot),
           (error) => sendJson(res, 500, { ok: false, message: errorMessage(error) }),
@@ -236,8 +369,9 @@ export function apply(ctx: unknown): void {
           if (!presetId) throw new Error("presetId is required");
           const inventory = await presets.compositionInventory();
           if (!inventory.some((item) => item.id === presetId)) throw new Error(`unknown preset ${JSON.stringify(presetId)}`);
+          await defaultPreset.ensure();
           const key = await presets.standingKeyFor(presetId);
-          const schemas = mergeSchemas(tools.schemas(key), await catalogSchemas(presetId))
+          const schemas = mergeSchemas(tools.schemas(key), await catalog.schemasFor(presetId))
             .filter((schema) => schema.name !== DISCOVERY_TOOL_NAME && schema.name !== PTC_TRANSPORT_NAME);
           const selected = selectSuggestionTools(schemas, body?.toolNames);
           const otherGroupNames = normalizeGroupNames(body?.otherGroupNames);
@@ -273,8 +407,9 @@ export function apply(ctx: unknown): void {
           if (!presetId) throw new Error("presetId is required");
           const inventory = await presets.compositionInventory();
           if (!inventory.some((item) => item.id === presetId)) throw new Error(`unknown preset ${JSON.stringify(presetId)}`);
+          await defaultPreset.ensure();
           const key = await presets.standingKeyFor(presetId);
-          const schemas = mergeSchemas(tools.schemas(key), await catalogSchemas(presetId))
+          const schemas = mergeSchemas(tools.schemas(key), await catalog.schemasFor(presetId))
             .filter((schema) => schema.name !== DISCOVERY_TOOL_NAME && schema.name !== PTC_TRANSPORT_NAME);
           const selected = selectSuggestionTools(schemas, body?.toolNames);
           const otherGroupNames = normalizeGroupNames(body?.otherGroupNames);
@@ -305,10 +440,13 @@ export function apply(ctx: unknown): void {
             ? body.expectedRevision
             : undefined;
           const next = normalizeSettings(body?.settings);
-          await assertNoEmptyGroups(presets, tools, next);
+          await assertNoEmptyGroups(presets, tools, next, () => defaultPreset.ensure());
           await config.replace(next, expectedRevision);
           runtime.update(config.get());
-          return buildSnapshot(presets, tools, config.get(), config.revision, config.path, observedSchemas);
+          // `buildSnapshot` mounts every inspectable preset, so the default must
+          // already be composed before it runs (see DefaultPresetMount).
+          await defaultPreset.ensure();
+          return buildSnapshot(presets, tools, config.get(), config.revision, config.path, catalog.schemasFor);
         })().then(
           (snapshot) => sendJson(res, 200, snapshot),
           (error) => sendJson(res, 400, { ok: false, message: errorMessage(error) }),
@@ -318,6 +456,7 @@ export function apply(ctx: unknown): void {
   });
 
   context.effect?.(() => async () => {
+    compositionWatch.dispose();
     await probe.dispose();
     await runtime.dispose();
   }, "dsh-tool-manager runtime");
@@ -334,10 +473,25 @@ function livePresetSchemas(
   return existing.ctx.get<ToolRuntimeLike>("tools")?.schemas(existing) ?? [];
 }
 
+function warn(context: ContextLike, message: string): void {
+  context.get<{ warn?(format: unknown, ...rest: unknown[]): void }>("logger")?.warn?.(message);
+}
+
+/** Informational sink that still surfaces when the Host logger has no info level. */
+function info(context: ContextLike, message: string): void {
+  const logger = context.get<{
+    info?(format: unknown, ...rest: unknown[]): void;
+    warn?(format: unknown, ...rest: unknown[]): void;
+  }>("logger");
+  (logger?.info ?? logger?.warn)?.(message);
+}
+
 export async function assertNoEmptyGroups(
   presets: AgentPresetsLike,
   tools: ToolRuntimeLike,
   settings: ReturnType<typeof normalizeSettings>,
+  /** Composes the session default before this call mounts any other preset. */
+  composeDefaultFirst?: () => Promise<void>,
 ): Promise<void> {
   const inventory = await presets.compositionInventory();
   const inspectable = new Map(inventory.map((item) => [item.id, item]));
@@ -347,6 +501,7 @@ export async function assertNoEmptyGroups(
     if (!composition || composition.broken) continue;
     let names: string[];
     try {
+      await composeDefaultFirst?.();
       const key = await presets.standingKeyFor(presetId);
       names = tools.schemas(key).map((schema) => schema.name);
     } catch {
@@ -373,6 +528,10 @@ export async function assertNoEmptyGroups(
   }
 }
 
+function nextEventLoopTurn(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
 async function readJsonBody(req: HttpRequest): Promise<unknown> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
@@ -394,4 +553,7 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+export { TOOL_MANAGER_PROBE_SESSION_ID } from "./types.js";
+export { CompositionWatch, isBlankSession } from "./composition-watch.js";
+export type { CompositionWatchOptions } from "./composition-watch.js";
 export type * from "./types.js";

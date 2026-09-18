@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+## [1.2.5] - 2026-10-22
+
+### Fixed
+
+- 新增**通用**的组合切换自愈（[`src/composition-watch.ts`](src/composition-watch.ts)）：插件监听 `tools/change`，发现某个会话的 Preset 发生切换后，把它借另一个 Preset（`compositionInventory()` 中 composition row 最少者，通常是极简模式）空转一圈再切回目标 Preset。旧 composition 在离开时执行的 `removeScoped()` 会连带丢掉 DSH 因撞名失败而永久缓存的记录，目标 composition 于是在一个没有同名注册的 Agent 上干净安装。该机制**不含任何工具名假设**：任何插件按 Agent 注册的工具、无论丢了几个，都走同一条路径恢复。只对**未开始对话的空白会话**执行（DSH 本身也只允许空白会话切换模式），用 `recompose()` 因而不写会话记录、界面无感知；两条腿串行且第二条永远执行，失败会回滚到目标 Preset 并告警；已经开始的会话不被改动，只按探针参照系报出缺失工具并提示重开。自愈成功时输出一条自我报告日志（`... re-calibration restored them.`）。
+
+- 定位并缓解“标准模式新建会话 → 切到创造模式后丢失 `subagent` / `list_subagent_models`”：根因是 DSH 自身的组合切换竞态（`@deepseek-ai/dsh-tool-subagent` 的按 Agent 注册与上一个 composition 的异步拆除竞速，失败后该 Agent 被永久记住），与本插件的开关策略无关（出问题的会话里 `disabled` 为空、也不存在隐藏这两个工具的按需分组）。插件侧现在于加载时立刻组合部署默认 Agent Preset 的 standing composition，并让此后所有由插件发起的 mount（冷 Preset 探针、自动命名/自动分组、保存校验、快照）都先等它完成，从而不再由插件引入反向顺序。分析与上游修复建议见 [docs/composition-switch-race.md](docs/composition-switch-race.md)。
+- 修复共享冷 Preset 探针在切换作用域时把上一 Preset 的动态 Agent 工具串入下一 Preset 目录的问题；例如“极简模式”不再误显示仅 standard/ptc/cordis 提供的 `subagent` 和 `list_subagent_models`。
+- 探针切换后会等待动态作用域注册完成清理，并且探针自身的过渡态不再写入运行中 Agent 的持久观察缓存。
+- 修复 Preset 切换或新会话初始化期间，动态 Agent 作用域工具短暂卸载时被采样为永久 baseline，导致在 standard 关闭代理工具后，创造模式中的 `subagent` / `list_subagent_models` 也消失且重新开启无法恢复的问题；工具目录变化现在延迟到下一事件循环再刷新。
+
 ## [1.2.4] - 2026-10-22
 
 ### Fixed

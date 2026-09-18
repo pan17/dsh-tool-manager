@@ -27,7 +27,7 @@ function harness(options = {}) {
         if (name !== "tools") return undefined;
         return {
           schemas() {
-            return [schema(`tool-${currentPreset}`)];
+            return options.schemas ? options.schemas(currentPreset) : [schema(`tool-${currentPreset}`)];
           },
         };
       },
@@ -126,6 +126,24 @@ describe("single persistent Preset schema probe", () => {
     assert.equal(h.calls.resume.length, 1);
     assert.equal(h.calls.resume[0].resumeSessionId, TOOL_MANAGER_PROBE_SESSION_ID);
     assert.deepEqual(h.calls.mount, ["minimal"]);
+
+    await h.probe.dispose();
+  });
+
+  it("waits for scoped tool cleanup after switching Presets", async () => {
+    let visible = [schema("pwsh"), schema("subagent"), schema("list_subagent_models")];
+    const h = harness({
+      recomposeGate: async (id) => {
+        if (id !== "minimal") return;
+        setImmediate(() => {
+          visible = [schema("pwsh")];
+        });
+      },
+      schemas: () => visible,
+    });
+
+    await h.probe.inspect("standard");
+    assert.deepEqual((await h.probe.inspect("minimal")).map((item) => item.name), ["pwsh"]);
 
     await h.probe.dispose();
   });

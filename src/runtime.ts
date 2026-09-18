@@ -21,6 +21,7 @@ import {
 } from "./policy.js";
 import {
   DISCOVERY_TOOL_NAME,
+  TOOL_MANAGER_PROBE_SESSION_ID,
   type PresetToolPolicy,
   type ToolListResult,
   type ToolManagerSettings,
@@ -142,7 +143,7 @@ export class ToolPolicyRuntime {
 
   private observe(state: AgentState): void {
     const presetId = this.presetId(state.agent);
-    if (!presetId) return;
+    if (!presetId || state.agent.id === TOOL_MANAGER_PROBE_SESSION_ID) return;
     this.observeSchemas(presetId, state.baselineSchemas);
   }
 
@@ -188,7 +189,11 @@ export class ToolPolicyRuntime {
   private queueBaselineRefresh(): void {
     if (this.mutating || this.refreshQueued) return;
     this.refreshQueued = true;
-    queueMicrotask(() => {
+    // Tool registry changes can be emitted before asynchronous scoped plugin
+    // disposal/installation has settled (notably model-selectable subagent
+    // tools during Preset recomposition). Refresh on the next event-loop turn
+    // so the baseline is never snapshotted from that transient gap.
+    setImmediate(() => {
       this.refreshQueued = false;
       this.refreshAllBaselines();
     });
