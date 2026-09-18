@@ -163,10 +163,20 @@ export class ToolPolicyRuntime {
   private installLocalPolicy(state: AgentState): void {
     const scopedTools = state.agent.ctx.get<ToolRuntimeLike>("tools");
     state.guard = scopedTools?.guard?.((execution) => {
-      const hidden = denyNames(this.policy(state.agent), state.baseline, state.exposures);
-      return hidden.includes(execution.name)
-        ? `tool ${JSON.stringify(execution.name)} is disabled by the tool-manager policy for this Agent preset`
-        : undefined;
+      const policy = this.policy(state.agent);
+      const hidden = denyNames(policy, state.baseline, state.exposures);
+      if (!hidden.includes(execution.name)) return undefined;
+      if (policy.disabled.includes(execution.name)) {
+        return `tool ${JSON.stringify(execution.name)} is disabled by the tool-manager policy for this Agent preset`;
+      }
+      const open = new Set([...state.exposures].map((name) => name.toLowerCase()));
+      const group = resolveActiveGroups(policy, state.baseline).find((item) => (
+        !open.has(item.name.toLowerCase()) && item.tools.includes(execution.name)
+      ));
+      if (group) {
+        return `tool ${JSON.stringify(execution.name)} belongs to on-demand group ${JSON.stringify(group.name)} which is not open; call ${DISCOVERY_TOOL_NAME} with ${JSON.stringify({ group: group.name })} first`;
+      }
+      return `tool ${JSON.stringify(execution.name)} is unavailable under the tool-manager policy for this Agent preset`;
     });
     state.assemblyFilter = state.agent.ctx.on("system-prompt/assemble", async (...args: unknown[]) => {
       const next = args.at(-1);

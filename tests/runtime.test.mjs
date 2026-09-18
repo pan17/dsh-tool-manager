@@ -142,6 +142,65 @@ describe("ToolPolicyRuntime restart recovery", () => {
     await runtime.dispose();
   });
 
+  it("explains when a tool's on-demand group must be opened first", async () => {
+    const schemas = ["tool_list", "plugin_manager", "subagent"].map((name) => ({
+      name,
+      description: name,
+      parameters: {},
+    }));
+    let guard;
+    let discovery;
+    const scopedTools = {
+      schemas() { return schemas; },
+      register() { throw new Error("scope register should not be used"); },
+      restrict() { return () => {}; },
+      guard(callback) { guard = callback; return () => {}; },
+    };
+    const agent = {
+      ctx: {
+        get(name) { return name === "tools" ? scopedTools : undefined; },
+        on() { return () => {}; },
+      },
+      session: resumedSession(),
+    };
+    const context = {
+      get(name) {
+        if (name === "tools") return {
+          schemas() { return schemas; },
+          register(definition) { discovery = definition; return () => {}; },
+        };
+        if (name === "agents") return { list: () => [agent] };
+        return undefined;
+      },
+      on() {},
+    };
+    const presets = { composedPreset: () => "cordis" };
+    const runtime = new ToolPolicyRuntime(context, presets, {
+      presets: {
+        cordis: {
+          disabled: ["subagent"],
+          groups: [{
+            name: "Cordis插件管理",
+            patterns: ["plugin_manager", "subagent"],
+          }],
+        },
+      },
+    });
+    runtime.start();
+
+    assert.equal(
+      guard({ name: "plugin_manager" }),
+      'tool "plugin_manager" belongs to on-demand group "Cordis插件管理" which is not open; call tool_list with {"group":"Cordis插件管理"} first',
+    );
+    assert.match(guard({ name: "subagent" }), /disabled by the tool-manager policy/);
+
+    await discovery.execute({ group: "Cordis插件管理" }, { agent });
+
+    assert.equal(guard({ name: "plugin_manager" }), undefined);
+    assert.match(guard({ name: "subagent" }), /disabled by the tool-manager policy/);
+    await runtime.dispose();
+  });
+
   it("keeps standard delegation policy isolated from creator sessions and restores it", async () => {
     const schemas = ["tool_list", "read", "list_subagent_models", "subagent"].map((name) => ({
       name,
