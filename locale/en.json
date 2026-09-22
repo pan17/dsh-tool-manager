@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Tool Manager",
+    "description": "Manage DSH agent tools per preset and open on-demand tool groups for the rest of a session"
+  }
+}

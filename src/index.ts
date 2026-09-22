@@ -7,7 +7,7 @@ import type {
   ToolRuntimeLike,
   ToolSchemaLike,
 } from "./dsh.js";
-import { asRecord } from "./dsh.js";
+import { asRecord, schemasForPreset } from "./dsh.js";
 import { CompositionWatch } from "./composition-watch.js";
 import { ToolManagerConfigStore } from "./config.js";
 import { groupPolicyIssues, matchesAnyPattern, normalizeSettings, policyFor } from "./policy.js";
@@ -214,7 +214,8 @@ export class DefaultPresetMount {
 
   private async compose(): Promise<void> {
     try {
-      await this.presets.standingKeyFor(undefined);
+      const lease = await this.presets.acquireScope(undefined);
+      await lease[Symbol.asyncDispose]();
       this.ready = true;
     } catch (error) {
       this.warn(`tool-manager could not compose the default agent preset before other presets: ${errorMessage(error)}`);
@@ -379,8 +380,8 @@ export function apply(ctx: unknown): void {
           const inventory = await presets.compositionInventory();
           if (!inventory.some((item) => item.id === presetId)) throw new Error(`unknown preset ${JSON.stringify(presetId)}`);
           await defaultPreset.ensure();
-          const key = await presets.standingKeyFor(presetId);
-          const schemas = mergeSchemas(tools.schemas(key), await catalog.schemasFor(presetId))
+          const standing = await schemasForPreset(presets, tools, presetId);
+          const schemas = mergeSchemas(standing, await catalog.schemasFor(presetId))
             .filter((schema) => schema.name !== DISCOVERY_TOOL_NAME && schema.name !== PTC_TRANSPORT_NAME);
           const selected = selectSuggestionTools(schemas, body?.toolNames);
           const otherGroupNames = normalizeGroupNames(body?.otherGroupNames);
@@ -417,8 +418,8 @@ export function apply(ctx: unknown): void {
           const inventory = await presets.compositionInventory();
           if (!inventory.some((item) => item.id === presetId)) throw new Error(`unknown preset ${JSON.stringify(presetId)}`);
           await defaultPreset.ensure();
-          const key = await presets.standingKeyFor(presetId);
-          const schemas = mergeSchemas(tools.schemas(key), await catalog.schemasFor(presetId))
+          const standing = await schemasForPreset(presets, tools, presetId);
+          const schemas = mergeSchemas(standing, await catalog.schemasFor(presetId))
             .filter((schema) => schema.name !== DISCOVERY_TOOL_NAME && schema.name !== PTC_TRANSPORT_NAME);
           const selected = selectSuggestionTools(schemas, body?.toolNames);
           const otherGroupNames = normalizeGroupNames(body?.otherGroupNames);
@@ -511,8 +512,7 @@ export async function assertNoEmptyGroups(
     let names: string[];
     try {
       await composeDefaultFirst?.();
-      const key = await presets.standingKeyFor(presetId);
-      names = tools.schemas(key).map((schema) => schema.name);
+      names = (await schemasForPreset(presets, tools, presetId)).map((schema) => schema.name);
     } catch {
       continue;
     }

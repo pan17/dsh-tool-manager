@@ -13,6 +13,14 @@ function schema(name) {
   return { name, description: name, parameters: {} };
 }
 
+function acquireScope(id, onAcquire) {
+  onAcquire?.(id);
+  return {
+    key: id ?? "<default>",
+    async [Symbol.asyncDispose]() {},
+  };
+}
+
 function pluginContext({ mounted, warnings }) {
   return {
     get(name) {
@@ -22,9 +30,8 @@ function pluginContext({ mounted, warnings }) {
           async compositionInventory() {
             return [];
           },
-          async standingKeyFor(id) {
-            mounted.push(id);
-            return { agentPreset: "standard" };
+          async acquireScope(id) {
+            return acquireScope(id, (wanted) => mounted.push(wanted));
           },
           async mount() {},
           async recompose() {},
@@ -52,10 +59,18 @@ function pluginContext({ mounted, warnings }) {
 describe("session default preset composition order", () => {
   it("composes the default through the unresolved preset id", async () => {
     const ids = [];
+    let released = 0;
     const presets = {
-      async standingKeyFor(id) {
+      async acquireScope(id) {
         ids.push(id);
-        return { agentPreset: "standard" };
+        const lease = await acquireScope(id);
+        return {
+          ...lease,
+          async [Symbol.asyncDispose]() {
+            released += 1;
+            await lease[Symbol.asyncDispose]();
+          },
+        };
       },
     };
     const mount = new DefaultPresetMount(presets, () => {});
@@ -63,14 +78,15 @@ describe("session default preset composition order", () => {
     await mount.ensure();
 
     assert.deepEqual(ids, [undefined]);
+    assert.equal(released, 1);
   });
 
   it("composes the default once for concurrent and repeated callers", async () => {
     let calls = 0;
     const presets = {
-      async standingKeyFor() {
+      async acquireScope() {
         calls += 1;
-        return {};
+        return acquireScope();
       },
     };
     const mount = new DefaultPresetMount(presets, () => {});
@@ -85,10 +101,10 @@ describe("session default preset composition order", () => {
     const warnings = [];
     let calls = 0;
     const presets = {
-      async standingKeyFor() {
+      async acquireScope() {
         calls += 1;
         if (calls === 1) throw new Error("default preset is broken");
-        return {};
+        return acquireScope();
       },
     };
     const mount = new DefaultPresetMount(presets, (message) => warnings.push(message));
@@ -110,9 +126,8 @@ describe("session default preset composition order", () => {
     const order = [];
     const presets = {
       composedPreset: () => undefined,
-      async standingKeyFor(id) {
-        order.push(`compose:${id ?? "<default>"}`);
-        return id;
+      async acquireScope(id) {
+        return acquireScope(id, (wanted) => order.push(`compose:${wanted ?? "<default>"}`));
       },
       async compositionInventory() {
         return [
@@ -157,7 +172,7 @@ describe("session default preset composition order", () => {
     };
     const presets = {
       composedPreset: () => "standard",
-      async standingKeyFor() {
+      async acquireScope() {
         throw new Error("must not compose for a live preset");
       },
       async compositionInventory() {
@@ -216,7 +231,7 @@ describe("session default preset composition order", () => {
       presets,
       probe: { inspect: async () => { throw new Error("must not probe a live preset"); } },
       defaultPreset: new DefaultPresetMount({
-        standingKeyFor: async () => { throw new Error("must not compose for a live preset"); },
+        acquireScope: async () => { throw new Error("must not compose for a live preset"); },
       }, () => {}),
       observed: () => [],
     });

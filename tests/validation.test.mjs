@@ -7,9 +7,12 @@ function presetService(inventory, schemasByPreset = {}) {
     async compositionInventory() {
       return inventory;
     },
-    async standingKeyFor(id) {
+    async acquireScope(id) {
       if (!(id in schemasByPreset)) throw new Error(`unavailable ${id}`);
-      return id;
+      return {
+        key: id,
+        async [Symbol.asyncDispose]() {},
+      };
     },
   };
 }

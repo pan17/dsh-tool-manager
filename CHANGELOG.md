@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+## [1.2.8] - 2026-09-23
+
+### Changed
+
+- 适配 DSH 0.1.7：Preset standing 目录改为 `agentPresets.acquireScope()`，并在读完 schema 后释放租约。`standingKeyFor()` 已从 DSH 移除，继续调用会让设置页快照和保存校验失败。
+- 插件管理页补充中英文 `locale` 标题与描述。
+- 设置页 API 请求改为相对当前文档 base URI，避免 Web 部署在反向代理子路径下打到错误主机。
+- `engines.dsh` 提升为 `>=0.1.7-alpha.1`。
+- README 标明仅适配 DSH 0.1.7-alpha.1 及更新版本；更早版本请继续使用 `1.2.7`。
+
 ## [1.2.7] - 2026-09-18
 
 ### Fixed

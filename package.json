@@ -1,10 +1,11 @@
 {
   "name": "dsh-tool-manager",
-  "version": "1.2.7",
+  "version": "1.2.8",
   "description": "Manage DSH agent tools per preset and open on-demand tool groups for the rest of a session",
   "type": "module",
   "files": [
     "dist/",
+    "locale/*.json",
     "cordis.patch.yml",
     "README.md",
     "DESIGN.md",
@@ -21,7 +22,8 @@
       "import": "./dist/index.js"
     },
     "./client": "./dist/client.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
   },
   "scripts": {
     "build": "tsc && node scripts/copy-client.mjs",
@@ -35,7 +37,7 @@
   },
   "engines": {
     "node": ">=20.0.0",
-    "dsh": ">=0.1.5-rc.1"
+    "dsh": ">=0.1.7-alpha.1"
   },
   "dsh": {
     "client": {

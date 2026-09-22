@@ -93,7 +93,7 @@
 
 ### 第一层：顺序预测（`DefaultPresetMount`）
 
-[`src/index.ts`](../src/index.ts) 的 `DefaultPresetMount`：插件加载时立刻 `standingKeyFor(undefined)`（即部署配置的默认 preset，也就是新建会话所用的 preset），此后**所有**由插件发起的 mount（探针、`suggest-group`、`auto-group`、保存校验、快照）都先 `await` 它。
+[`src/index.ts`](../src/index.ts) 的 `DefaultPresetMount`：插件加载时立刻 `acquireScope(undefined)`（即部署配置的默认 preset，也就是新建会话所用的 preset）并马上释放租约，此后**所有**由插件发起的 mount（探针、`suggest-group`、`auto-group`、保存校验、快照）都先 `await` 它。
 
 - 好处：只要默认 preset 在本次 Host 中先完成组合，WebUI 的“新建（默认模式）→ 切换模式”流程就是“先拆后建”，按 Agent 注册的工具不会丢；即使之后恢复了创造模式旧会话，顺序也不会被它抢先。
 - 边界：Profile 重新组合会让 row 重新激活并重排监听器顺序，本插件无法阻止——所以要靠第二层。

@@ -1,4 +1,5 @@
 import type { AgentPresetsLike, ToolRuntimeLike } from "./dsh.js";
+import { schemasForPreset } from "./dsh.js";
 import { policyFor, policyOrphans, resolveGroups } from "./policy.js";
 import {
   DISCOVERY_TOOL_NAME,
@@ -25,8 +26,7 @@ export async function buildSnapshot(
     let broken = composition.broken;
     if (!broken) {
       try {
-        const key = await presets.standingKeyFor(composition.id);
-        const standing = tools.schemas(key);
+        const standing = await schemasForPreset(presets, tools, composition.id);
         const observed = observedSchemas?.(composition.id) ?? [];
         schemas = mergeSchemas(standing, observed)
           .filter((schema) => schema.name !== DISCOVERY_TOOL_NAME && schema.name !== PTC_TRANSPORT_NAME)
@@ -40,7 +40,7 @@ export async function buildSnapshot(
     views.push({
       id: composition.id,
       ...(composition.name ? { name: composition.name } : {}),
-      trust: composition.trust,
+      trust: composition.trust ?? "system",
       isDefault: composition.isDefault,
       ...(broken ? { broken } : {}),
       tools: schemas,

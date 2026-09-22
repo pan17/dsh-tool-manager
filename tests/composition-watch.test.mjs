@@ -61,8 +61,11 @@ function fakePresets({ calls = [], inventory = INVENTORY, onRecompose } = {}) {
       calls.push(id);
       ctx.preset = id;
     },
-    async standingKeyFor() {
-      return {};
+    async acquireScope(id) {
+      return {
+        key: id ?? "<default>",
+        async [Symbol.asyncDispose]() {},
+      };
     },
     async mount() {},
   };
@@ -384,8 +387,11 @@ describe("plugin wiring", () => {
             async compositionInventory() {
               return INVENTORY;
             },
-            async standingKeyFor() {
-              return {};
+            async acquireScope(id) {
+              return {
+                key: id ?? "<default>",
+                async [Symbol.asyncDispose]() {},
+              };
             },
             async mount() {},
             async recompose(ctx, id) {

@@ -64,7 +64,7 @@ Agent loop 在 `preStep()` 中**先** `systemPrompt.assemble()`，**再**跑 `ag
 
 工具开关保存在 `$DSH_HOME/tool-manager.json`（可由 `DSH_TOOL_MANAGER_CONFIG` 覆盖）的独立配置文件中，而不是修改 shipped preset、DSH Settings 或直接操作 Loader entry。
 
-设置页为了列出每个 Preset 的实际 schema，会对未 broken 的 Preset 调用 `standingKeyFor()`。这会创建/复用 standing mount（与开一个该 Preset 的会话相同），但不会改写 composition 文件。
+设置页为了列出每个 Preset 的实际 schema，会对未 broken 的 Preset 调用 `acquireScope()`。这会租用 standing mount（与开一个该 Preset 的会话相同）并在读完 schema 后释放租约，但不会改写 composition 文件。
 
 ## 3. 推荐架构
 

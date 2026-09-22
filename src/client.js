@@ -50,7 +50,10 @@ window.__ModuleLoader__.load({
 		}
 
 		function api(path, options) {
-			return fetch("/tool-manager/api" + path, {
+			const url = typeof document !== "undefined"
+				? new URL("tool-manager/api" + path, document.baseURI).toString()
+				: "/tool-manager/api" + path;
+			return fetch(url, {
 				headers: { "Content-Type": "application/json" },
 				...options,
 			}).then(async (response) => {
@@ -866,7 +869,7 @@ window.__ModuleLoader__.load({
 							value: preset.id,
 							disabled: autoGrouping,
 							onChange: (event) => { setActive(event.target.value); setQuery(""); setFilter("all"); setModal(null); setAutoPreview(null); setAutoGroupError(""); setExpanded({}); },
-						}, draft.presets.map((item) => h("option", { key: item.id, value: item.id }, (item.name || item.id) + " · " + (item.tools || []).length + " 个工具" + (item.isDefault ? " · 默认" : "") + (item.trust === "system" ? "" : " · 用户")))),
+						}, draft.presets.map((item) => h("option", { key: item.id, value: item.id }, (item.name || item.id) + " · " + (item.tools || []).length + " 个工具" + (item.isDefault ? " · 默认" : "") + (item.trust === "user" ? " · 用户" : "")))),
 					),
 				),
 				preset.broken ? h("div", { className: "tm_error" }, preset.broken) : null,

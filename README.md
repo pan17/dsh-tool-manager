@@ -2,6 +2,8 @@
 
 一个简单好用的 DeepSeek Harness（DSH）工具管理插件。
 
+**适配 DSH `>=0.1.7-alpha.1`。** 当前主干已改为调用 `agentPresets.acquireScope()`，不能装在 0.1.6 及更早版本上；那些版本请继续使用 `1.2.7`。
+
 它可以帮你：
 
 - 按 Agent Preset 开启或关闭工具；
@@ -58,6 +60,8 @@
 - 明确关闭的工具不会被按需组重新启用。
 
 ## 安装
+
+要求 DeepSeek Harness **0.1.7-alpha.1 或更新**。旧版本没有 `acquireScope()`，设置页快照会失败。
 
 ```bash
 npx @deepseek-ai/dsh plugin --profile web add dsh-tool-manager

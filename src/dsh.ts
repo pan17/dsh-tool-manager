@@ -73,11 +73,20 @@ export interface LlmRuntimeLike {
   }): AsyncIterable<StreamChunkLike>;
 }
 
+export interface PresetScopeLease {
+  readonly key: unknown;
+  [Symbol.asyncDispose](): Promise<void>;
+}
+
 export interface AgentPresetsLike {
   composedPreset(agentCtx: ContextLike): string | undefined;
   compositionInventory(): Promise<PresetCompositionLike[]>;
-  /** Absent id resolves the configured default preset. */
-  standingKeyFor(id?: string): Promise<unknown>;
+  /**
+   * Lease the standing preset revision so its registrations can be read
+   * without creating an Agent. Absent id resolves the configured default.
+   * Dispose the lease after the scoped read completes.
+   */
+  acquireScope(id?: string): Promise<PresetScopeLease>;
   mount(agentCtx: ContextLike, id: string): Promise<unknown>;
   recompose(agentCtx: ContextLike, id: string): Promise<unknown>;
 }
@@ -92,7 +101,8 @@ export interface PresetCompositionRowLike {
 export interface PresetCompositionLike {
   id: string;
   name?: string;
-  trust: "system" | "user";
+  /** Present on older DSH inventories; 0.1.7 no longer reports trust. */
+  trust?: "system" | "user";
   isDefault: boolean;
   broken?: string;
   /** Mounted composition rows; the re-calibration transit is picked by row count. */
@@ -106,4 +116,18 @@ export interface AgentsLike {
 export function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
   return value as Record<string, unknown>;
+}
+
+/** Read one preset's standing schemas and always release the revision lease. */
+export async function schemasForPreset(
+  presets: AgentPresetsLike,
+  tools: ToolRuntimeLike,
+  id?: string,
+): Promise<ToolSchemaLike[]> {
+  const lease = await presets.acquireScope(id);
+  try {
+    return tools.schemas(lease.key);
+  } finally {
+    await lease[Symbol.asyncDispose]();
+  }
 }
