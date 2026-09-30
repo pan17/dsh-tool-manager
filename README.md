@@ -63,11 +63,47 @@
 
 要求 DeepSeek Harness **0.1.7-alpha.1 或更新**。旧版本没有 `acquireScope()`，设置页快照会失败。
 
+### 方式一：设置页内直接安装（推荐）
+
+打开 **设置 → 插件 → 添加插件**，在输入框填包名：
+
+```text
+dsh-tool-manager
+```
+
+点「安装」即可。插件声明了 `dsh.bundle`，安装时会被自动注册成 bundle 层。
+国内网络下载慢时，把「安装源」切到 **中国大陆镜像源**。
+
+安装完成后若提示「已安装，下次启动后加载」，重启 DSH 即可；若出现
+「立即启用」按钮，也可以直接点它免重启。
+
+然后打开 WebUI：
+
+```text
+http://127.0.0.1:3080
+```
+
+进入：
+
+**设置 → 工具管理**
+
+### 方式二：命令行
+
+桌面版（Electron）用户请直接用应用自带的 `dsh` 命令（安装桌面版时会加入 PATH），
+它支持 `--profile desktop`：
+
 ```bash
-npx @deepseek-ai/dsh plugin --profile web add dsh-tool-manager
+dsh plugin --profile desktop add dsh-tool-manager
+dsh plugin --profile desktop list --depth 0
 ```
 
 安装完成后，重启对应的 DSH Profile。
+
+非桌面版（`web` / `tui` / `headless` 等自建 profile）：
+
+```bash
+npx @deepseek-ai/dsh plugin --profile web add dsh-tool-manager
+```
 
 然后打开 WebUI：
 
@@ -82,9 +118,13 @@ http://127.0.0.1:3080
 升级 / 卸载：
 
 ```bash
-npx @deepseek-ai/dsh plugin --profile web update dsh-tool-manager
-npx @deepseek-ai/dsh plugin --profile web remove dsh-tool-manager
+dsh plugin --profile desktop update dsh-tool-manager
+dsh plugin --profile desktop remove dsh-tool-manager
 ```
+
+> `--dump-config` 在 `desktop` profile 上会被拒绝（该 profile 由 Electron 应用
+> 独占管理），要验证组合配置请改用 `dsh plugin --profile desktop list`，
+> 或直接在设置页查看。
 
 ## 使用方法
 
@@ -195,16 +235,6 @@ DSH_TOOL_MANAGER_CONFIG
 - 修改配置不会改写 DSH 自带的 Agent Preset 文件；
 - 按需开放只对当前 Agent 会话生效；
 - 自动命名和自动分组会调用当前默认模型，因此会产生一次模型请求；执行前的确认框可预览和编辑提示词，并可分别设置 5–600 秒超时，默认分别为 60 秒和 120 秒；插件不限制提示词/请求体大小、工具或分组数量、名称/描述长度、模型返回文本长度及输出 Token，实际可用范围仍由当前模型、供应商和运行环境决定。
-
-### 关于“某个会话缺少 preset 工具”
-
-DSH 自身存在一个组合切换竞态：切换模式时，旧 composition 的按 Agent 工具注册是**异步**拆除的，而新 composition 会在同一次 `tools/change` 里抢着注册同名工具；谁先落地由监听器注册顺序（≈ Preset 的 mount 顺序）决定。撞名失败后，DSH 会把这次失败**永久记住**，该 Agent 在重建之前都拿不到这些工具。典型触发是“重启后先恢复了一个非默认模式的旧会话”，于是之后“新建会话 → 切到该模式”都会中招。
-
-- 这**不是**本插件的开关或目录探测造成的：出问题的会话里对应 Preset 的 `disabled` 是空的，也不存在包含这些工具的按需分组；
-- 本插件有两层处理：① 加载时先组合默认 Preset，且由插件发起的挂载都排在它之后，不让插件把顺序弄反；② **通用自愈** —— 每次模式切换之后，插件会把这个会话借另一个 Preset 空转一圈再切回目标 Preset，让目标 composition 在一个“没有同名注册”的 Agent 上重新安装。这一层**不认工具名**：丢的是谁家的工具、丢了几个，都走同一条路径修好；
-- 自愈只对**还没开始对话的空白会话**执行（DSH 本身也只允许空白会话切换模式），因此没有可损失的内容；已经开始的会话不会被改动，插件会在日志里点名缺了哪些工具并提示重开；
-- 自愈成功时日志里会出现一条自我报告：`... lost N tool(s) on the switch to preset "..." — ... — and re-calibration restored them.`；
-- 完整分析、证据与上游修复建议见 [docs/composition-switch-race.md](docs/composition-switch-race.md)。
 
 ## 开发
 
