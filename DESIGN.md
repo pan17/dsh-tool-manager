@@ -124,7 +124,8 @@ interface ToolManagerSettings {
 - 只有至少匹配一个当前真实且未被显式关闭工具的组才是有效组。空组或仅含关闭工具的组不进入目录、不能通过 `tool_list` 打开，且当某 Preset 没有有效组时会隐藏 `tool_list`；
 - 工具状态互斥：一个工具只能是常开、已关闭，或属于一个按需组。WebUI 不提供已关闭或被其他组占用的工具；Host 保存接口拒绝关闭工具入组和跨组重复；
 - 旧 wildcard 配置在编辑时投影为当前实际成员的精确工具名。运行时对尚未修复的重叠配置按组顺序 first-match，确保目录中一个工具最多出现一次；
-- WebUI 和 Host 保存接口都禁止保存空组。旧配置中的空组或冲突组仍会在设置页中标为无效，供用户修复或删除。
+- WebUI 和 Host 保存接口都禁止保存空组。旧配置中的空组或冲突组仍会在设置页中标为无效，供用户修复或删除；
+- 保存校验与设置页必须读**同一份**工具目录：standing composition 与 Agent 作用域注册（探针 + 运行中 Agent 观测）的并集。只读 standing 会把 `@deepseek-ai/dsh-schedule` 注入每个 root Agent 的 `schedule_*`、以及 `modelSelectionSettings` 注入的 `subagent` 判成不存在，从而拒绝一个页面能列出、运行时也能正常打开的组。只有真正读不到 standing composition 时才跳过该校验。
 
 ## 4. 关键实现陷阱
 

@@ -229,6 +229,8 @@ export class DefaultPresetMount {
 export interface PresetCatalog {
   /** Every schema known for one Preset, for the page's per-Preset catalog. */
   schemasFor(presetId: string): ToolSchemaLike[];
+  /** Probe one Preset on demand so `schemasFor` can answer for it. */
+  ensure(presetId: string): Promise<void>;
   /** Probe every Preset the roster supplies, so the page can list all of them. */
   ensureAll(): Promise<void>;
 }
@@ -282,6 +284,9 @@ export function createPresetCatalog(options: PresetCatalogOptions): PresetCatalo
 
   return {
     schemasFor: (presetId) => mergeSchemas(catalogedSchemas.get(presetId) ?? [], observed(presetId)),
+    ensure: async (presetId) => {
+      await catalogSchemas(presetId);
+    },
     ensureAll: async () => {
       const inventory = await presets.compositionInventory();
       await Promise.all(inventory.filter((item) => !item.broken).map((item) => catalogSchemas(item.id)));
@@ -450,7 +455,19 @@ export function apply(ctx: unknown): void {
             ? body.expectedRevision
             : undefined;
           const next = normalizeSettings(body?.settings);
-          await assertNoEmptyGroups(presets, tools, next, () => defaultPreset.ensure());
+          // Save validation must read the same catalog the page rendered. A
+          // standing-only read misses every tool a plugin registers into each
+          // Agent's own scope — `dsh-schedule` attaches `schedule_*` to every
+          // root Agent, `dsh-tool-subagent` injects `subagent` there — so a
+          // group built from those tools is rejected as empty although the page
+          // lists them and the runtime opens them normally.
+          await assertNoEmptyGroups(
+            presets,
+            tools,
+            next,
+            () => defaultPreset.ensure(),
+            (presetId) => visiblePresetToolNames(presets, tools, catalog, presetId),
+          );
           await config.replace(next, expectedRevision);
           runtime.update(config.get());
           // `buildSnapshot` mounts every inspectable preset, so the default must
@@ -496,12 +513,42 @@ function info(context: ContextLike, message: string): void {
   (logger?.info ?? logger?.warn)?.(message);
 }
 
+/**
+ * Every tool name the page can show for one Preset: the standing composition
+ * unioned with the Agent-scoped registrations the probe and live Agents
+ * observed.
+ *
+ * Returns `undefined` when the standing composition cannot be read at all, so
+ * the save path keeps its historical "an uninspectable Preset is not validated"
+ * behaviour instead of reporting every group as empty.
+ */
+export async function visiblePresetToolNames(
+  presets: AgentPresetsLike,
+  tools: ToolRuntimeLike,
+  catalog: Pick<PresetCatalog, "schemasFor" | "ensure">,
+  presetId: string,
+): Promise<string[] | undefined> {
+  const standing = await schemasForPreset(presets, tools, presetId).catch(() => undefined);
+  if (!standing) return undefined;
+  await catalog.ensure(presetId).catch(() => undefined);
+  const names = new Set(standing.map((schema) => schema.name));
+  for (const schema of catalog.schemasFor(presetId)) names.add(schema.name);
+  return [...names];
+}
+
 export async function assertNoEmptyGroups(
   presets: AgentPresetsLike,
   tools: ToolRuntimeLike,
   settings: ReturnType<typeof normalizeSettings>,
   /** Composes the session default before this call mounts any other preset. */
   composeDefaultFirst?: () => Promise<void>,
+  /**
+   * Reads the tool names one Preset can actually expose. Callers that have a
+   * merged catalog must pass it: a standing-only read misses the tools plugins
+   * register into each Agent's own scope, which the page lists and the runtime
+   * happily opens. `undefined` skips that Preset.
+   */
+  toolNamesFor?: (presetId: string) => Promise<string[] | undefined> | string[] | undefined,
 ): Promise<void> {
   const inventory = await presets.compositionInventory();
   const inspectable = new Map(inventory.map((item) => [item.id, item]));
@@ -509,13 +556,16 @@ export async function assertNoEmptyGroups(
     if (policy.groups.length === 0) continue;
     const composition = inspectable.get(presetId);
     if (!composition || composition.broken) continue;
-    let names: string[];
+    let names: string[] | undefined;
     try {
       await composeDefaultFirst?.();
-      names = (await schemasForPreset(presets, tools, presetId)).map((schema) => schema.name);
+      names = toolNamesFor
+        ? await toolNamesFor(presetId)
+        : (await schemasForPreset(presets, tools, presetId)).map((schema) => schema.name);
     } catch {
       continue;
     }
+    if (names === undefined) continue;
     const issues = groupPolicyIssues(policyFor(settings, presetId), names);
     if (issues.disabledMembers.length > 0) {
       const issue = issues.disabledMembers[0]!;

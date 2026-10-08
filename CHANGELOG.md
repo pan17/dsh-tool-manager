@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+## [1.2.10] - 2026-10-08
+
+### Fixed
+
+- 修复保存按需分组时把「只按 Agent 作用域注册」的工具误判为空组、导致无法保存的问题。典型表现：为 `@deepseek-ai/dsh-schedule` 提供的 `schedule_create` / `schedule_list` / `schedule_delete` / `schedule_update` 建组后点保存，报 `Preset "standard" has empty tool groups: "定时提醒管理"`，而页面明明列出了这些工具、`tool_list` 也能正常打开该组。根因是保存校验只读 Preset 的 standing composition（`acquireScope()`），而页面目录是 standing 与 Agent 作用域注册（探针 + 运行中 Agent 观测）的并集；`subagent` 等由 `modelSelectionSettings` 注入的工具同样受影响。现在校验与页面使用同一份目录，并且只在真正读不到 standing composition 时才跳过该校验。同时修正了同一根因下的两个次生问题：仅含 Agent 作用域工具的组里出现已关闭成员时误报「空组」而非「已关闭工具不能入组」，以及两个此类组之间的重复成员漏检。
+
 ## [1.2.9] - 2026-10-08
 
 ### Changed

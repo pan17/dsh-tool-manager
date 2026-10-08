@@ -122,4 +122,95 @@ describe("tool-manager save validation", () => {
       },
     );
   });
+
+  // A plugin may register tools into each Agent's OWN scope rather than the
+  // Preset's standing composition: `dsh-schedule` attaches the four
+  // `schedule_*` tools to every root Agent, `dsh-tool-subagent` injects
+  // `subagent`. The settings page lists them (standing unioned with live/probe
+  // observations) and the runtime opens them, so save validation must read the
+  // same catalog instead of rejecting the group as empty.
+  it("accepts a group built only from Agent-scoped tools", async () => {
+    const schemas = { standard: ["read", "web_search"] };
+    const agentScoped = ["schedule_create", "schedule_list", "schedule_delete", "schedule_update"];
+    await assertNoEmptyGroups(
+      presetService([{ id: "standard", trust: "system", isDefault: true }], schemas),
+      toolService(schemas),
+      {
+        presets: {
+          standard: {
+            disabled: [],
+            groups: [{ name: "定时提醒管理", patterns: agentScoped }],
+          },
+        },
+      },
+      undefined,
+      (presetId) => [...schemas[presetId], ...agentScoped],
+    );
+  });
+
+  it("still rejects a group whose members are absent from the merged catalog", async () => {
+    const schemas = { standard: ["read"] };
+    await assert.rejects(
+      () => assertNoEmptyGroups(
+        presetService([{ id: "standard", trust: "system", isDefault: true }], schemas),
+        toolService(schemas),
+        {
+          presets: {
+            standard: { disabled: [], groups: [{ name: "Missing", patterns: ["schedule_create"] }] },
+          },
+        },
+        undefined,
+        (presetId) => schemas[presetId],
+      ),
+      /empty tool groups: "Missing"/,
+    );
+  });
+
+  it("detects conflicts between two Agent-scoped groups through the merged catalog", async () => {
+    const schemas = { standard: ["read"] };
+    const agentScoped = ["schedule_create", "schedule_list"];
+    const merged = (presetId) => [...schemas[presetId], ...agentScoped];
+    const presets = presetService([{ id: "standard", trust: "system", isDefault: true }], schemas);
+    const tools = toolService(schemas);
+    await assert.rejects(
+      () => assertNoEmptyGroups(presets, tools, {
+        presets: {
+          standard: {
+            disabled: [],
+            groups: [
+              { name: "A", patterns: ["schedule_create"] },
+              { name: "B", patterns: ["schedule_create"] },
+            ],
+          },
+        },
+      }, undefined, merged),
+      /assigns tool "schedule_create" to multiple groups: "A", "B"/,
+    );
+    await assert.rejects(
+      () => assertNoEmptyGroups(presets, tools, {
+        presets: {
+          standard: {
+            disabled: ["schedule_create"],
+            groups: [{ name: "A", patterns: ["schedule_create"] }],
+          },
+        },
+      }, undefined, merged),
+      /disabled tool "schedule_create" in group "A"/,
+    );
+  });
+
+  it("skips a preset whose merged catalog cannot be read", async () => {
+    const schemas = { standard: ["read"] };
+    await assertNoEmptyGroups(
+      presetService([{ id: "standard", trust: "system", isDefault: true }], schemas),
+      toolService(schemas),
+      {
+        presets: {
+          standard: { disabled: [], groups: [{ name: "Unknown", patterns: ["anything"] }] },
+        },
+      },
+      undefined,
+      () => undefined,
+    );
+  });
 });
