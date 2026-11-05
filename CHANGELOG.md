@@ -5,6 +5,20 @@
 
 ## [Unreleased]
 
+## [1.2.11] - 2026-11-05
+
+### Fixed
+
+- 适配 DSH 0.2.2（含 `0.2.2-rc.1`）：`system-prompt/assemble` 的载荷由 `PromptAssembly` 改为 `PromptPresentation`，只带 `sections` / `contexts` / `variables`，工具声明改由工具注册表在 waterfall **之后**挂回。旧实现要求载荷同时包含 `tools` 数组，在 0.2.2 上判断失败并原样返回，导致 `tool:<名称>` 提示词段落不再剔除。现在只要求 `sections`：旧版继续同时过滤工具声明与段落，新版过滤段落文本。
+- 恢复 DSH 0.2.2 上「所有工具都能隐藏」的行为：新增 per-step 过滤，包装 `tools.resolve()` 返回的准入集合，把策略隐藏的工具名从该步的工具集合中剔除。0.2.2 的提示词工具声明、PTC 绑定与执行查找全部由这份集合派生，因此按 **Agent 自身作用域** 注册的工具（`subagent`、`list_subagent_models`、`schedule_*` 等）与全局工具表现一致：未打开按需组或已关闭时，既不在模型工具列表中，也无法调用。这是 `tools.restrict()` 之外的补充路径——`restrict()` 按设计只作用于 global/祖先层，无法隐藏 Agent 自身作用域的注册。包装只改写 `view()` 的投影，失败时原样返回 Host 的集合，插件卸载时还原；旧版 DSH 没有 `resolve()`，自动跳过。
+- 若上述包装无法安装（Host 改动了该接口），保留 0.2.2 的降级路径并**只告警一次**：继续过滤提示词段落，调用仍由 guard 拦截，并列出受影响的工具名。
+
+### Changed
+
+- 移除工具目录快照中的 `trust` 字段：DSH 自 0.1.7 起不再上报 Preset 信任级别，快照此前始终填 `system`，属于误导性数据；设置页从未渲染该字段。
+- README 补充 DSH 0.2.2 的适配范围、Node.js 24.9 最低要求，以及升级前需移除 `tools.mode` / `DSH_TOOLS_MODE` 的提醒。
+- 版本提升至 `1.2.11`；`engines.dsh` 保持 `>=0.2.0-rc.2`，0.2.1 用户无需改变。
+
 ## [1.2.10] - 2026-10-08
 
 ### Fixed

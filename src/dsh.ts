@@ -101,8 +101,6 @@ export interface PresetCompositionRowLike {
 export interface PresetCompositionLike {
   id: string;
   name?: string;
-  /** Present on older DSH inventories; 0.1.7 no longer reports trust. */
-  trust?: "system" | "user";
   isDefault: boolean;
   broken?: string;
   /** Mounted composition rows; the re-calibration transit is picked by row count. */

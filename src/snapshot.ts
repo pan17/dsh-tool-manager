@@ -40,7 +40,6 @@ export async function buildSnapshot(
     views.push({
       id: composition.id,
       ...(composition.name ? { name: composition.name } : {}),
-      trust: composition.trust ?? "system",
       isDefault: composition.isDefault,
       ...(broken ? { broken } : {}),
       tools: schemas,

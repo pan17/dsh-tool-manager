@@ -142,6 +142,140 @@ describe("ToolPolicyRuntime restart recovery", () => {
     await runtime.dispose();
   });
 
+  it("filters section text when DSH assembles without tool declarations (0.2.2 fallback)", async () => {
+    const schemas = ["read", "subagent"].map((name) => ({ name, description: name, parameters: {} }));
+    let guard;
+    let assemble;
+    const warnings = [];
+    const scopedTools = {
+      schemas() { return schemas; },
+      register() { throw new Error("scope register should not be used"); },
+      restrict() { throw new Error('tool "subagent" is scoped, not globally restrictable; known global tools: read'); },
+      guard(callback) { guard = callback; return () => {}; },
+    };
+    const agent = {
+      ctx: {
+        get(name) { return name === "tools" ? scopedTools : undefined; },
+        on(name, handler) { if (name === "system-prompt/assemble") assemble = handler; return () => {}; },
+      },
+      session: resumedSession(),
+    };
+    const context = {
+      get(name) {
+        if (name === "tools") return { schemas() { return schemas; }, register() { return () => {}; } };
+        if (name === "agents") return { list: () => [agent] };
+        if (name === "logger") return { warn: (message) => warnings.push(message) };
+        return undefined;
+      },
+      on() {},
+    };
+    const presets = { composedPreset: () => "standard" };
+    const runtime = new ToolPolicyRuntime(context, presets, {
+      presets: { standard: { disabled: ["subagent"], groups: [] } },
+    });
+    runtime.start();
+
+    // DSH >= 0.2.2 hands over a PromptPresentation: sections/contexts/variables
+    // only, and re-attaches the registry's tool declarations after the
+    // waterfall.
+    const presentation = () => ({
+      sections: [{ name: "tool:read" }, { name: "tool:subagent" }, { name: "identity" }],
+      contexts: [],
+      variables: {},
+    });
+
+    const filtered = await assemble({}, {}, async () => presentation());
+    assert.deepEqual(filtered.sections.map((item) => item.name), ["tool:read", "identity"]);
+    assert.equal("tools" in filtered, false);
+    assert.match(guard({ name: "subagent" }), /disabled by the tool-manager policy/);
+
+    // The Agent-scoped tool cannot be hidden from the prompt any more, so the
+    // runtime must say so once instead of failing silently.
+    const limitation = warnings.filter((message) => /Agent-scoped tool/.test(message));
+    assert.equal(limitation.length, 1);
+    assert.match(limitation[0], /subagent/);
+
+    await assemble({}, {}, async () => presentation());
+    assert.equal(warnings.filter((message) => /Agent-scoped tool/.test(message)).length, 1);
+    await runtime.dispose();
+  });
+
+  it("hides Agent-scoped tools from the per-step tool set (0.2.2)", async () => {
+    const globals = ["read"];
+    const own = ["subagent"];
+    const byName = new Map([...globals, ...own].map((name) => [name, { name, description: name, parameters: {} }]));
+    class ScopedTools {
+      denied = new Set();
+      schemas() { return [...byName.values()]; }
+      register() { return () => {}; }
+      restrict({ deny }) {
+        const unknown = deny.filter((name) => !globals.includes(name));
+        if (unknown.length > 0) {
+          throw new Error(`tools.restrict() names unknown global tools ${unknown.map((name) => `"${name}"`).join(", ")}; known global tools: ${globals.join(", ")}`);
+        }
+        this.denied = new Set(deny);
+        return () => { this.denied = new Set(); };
+      }
+      guard() { return () => {}; }
+      async resolve() {
+        const owner = this;
+        return {
+          dispose() {},
+          view() {
+            const admitted = new Map();
+            for (const name of [...globals.filter((item) => !owner.denied.has(item)), ...own]) {
+              admitted.set(name, byName.get(name));
+            }
+            return admitted;
+          },
+        };
+      }
+    }
+
+    const tools = new ScopedTools();
+    let assemble;
+    const warnings = [];
+    const agent = {
+      ctx: {
+        get(name) { return name === "tools" ? tools : undefined; },
+        on(name, handler) { if (name === "system-prompt/assemble") assemble = handler; return () => {}; },
+      },
+      session: resumedSession(),
+    };
+    const context = {
+      get(name) {
+        if (name === "tools") return tools;
+        if (name === "agents") return { list: () => [agent] };
+        if (name === "logger") return { warn: (message) => warnings.push(message) };
+        return undefined;
+      },
+      on() {},
+    };
+    const presets = { composedPreset: () => "standard" };
+    const runtime = new ToolPolicyRuntime(context, presets, {
+      presets: { standard: { disabled: ["subagent"], groups: [] } },
+    });
+    runtime.start();
+
+    const signal = new AbortController().signal;
+    const set = await tools.resolve({ agent, modelSelection: { provider: "p", model: "m" }, signal });
+    assert.deepEqual([...set.view(agent).keys()], ["read"]);
+    set.dispose();
+
+    // The declarations are already filtered, so the fallback warning must stay silent.
+    await assemble({}, {}, async () => ({
+      sections: [{ name: "tool:read" }, { name: "tool:subagent" }],
+      contexts: [],
+      variables: {},
+    }));
+    assert.deepEqual(warnings.filter((message) => /Agent-scoped tool/.test(message)), []);
+
+    // Unloading restores the Host's own resolve().
+    await runtime.dispose();
+    const restored = await tools.resolve({ agent, modelSelection: { provider: "p", model: "m" }, signal });
+    assert.deepEqual([...restored.view(agent).keys()].sort(), ["read", "subagent"]);
+  });
+
   it("explains when a tool's on-demand group must be opened first", async () => {
     const schemas = ["tool_list", "plugin_manager", "subagent"].map((name) => ({
       name,

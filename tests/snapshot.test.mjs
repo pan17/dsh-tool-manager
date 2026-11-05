@@ -44,7 +44,8 @@ describe("snapshot schema merging", () => {
 
     assert.deepEqual(snapshot.presets.map((item) => item.id), ["standard"]);
     assert.deepEqual(snapshot.presets[0].tools.map((item) => item.name), ["read"]);
-    assert.equal(snapshot.presets[0].trust, "system");
+    // DSH stopped reporting preset trust; the snapshot must not invent one.
+    assert.equal(snapshot.presets[0].trust, undefined);
     assert.deepEqual(released, ["standard"]);
   });
 

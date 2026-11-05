@@ -42,6 +42,14 @@ mcp__<serverName>__<rawToolName>
 
 本次研究用动态 Cordis probe 实测：选择一个当前可见工具，施加 `deny` 后 `schemas(agent)` 中立刻消失，dispose 后立刻恢复。
 
+`restrict()` 只作用于 inherited（global + 祖先 scope）注册，Agent 自身作用域的注册按设计始终可见。DSH 0.2.2 之前，这一块由 `system-prompt/assemble` 的 `assembly.tools` 过滤兜住；0.2.2 把该 waterfall 改成只含 `sections` / `contexts` / `variables` 的 `PromptPresentation`，并在 waterfall 之后挂回工具声明，提示词层已无法删除声明。
+
+### 2.2.1 0.2.2 起改为过滤每一步的准入集合
+
+0.2.2 的 agent loop 在 `preStep()` 中先 `tools.resolve({ agent, modelSelection, signal })` 得到该步准入集合，随后提示词声明（`definitions()` → `toolSet.view()`）、PTC 绑定与 `executable()` 查找全部从这份集合派生。
+
+`resolve()` 不在 scope 链上做「own 层豁免」，因此它是隐藏 Agent 自身作用域注册的唯一受支持落点。插件包装 `ToolsService.prototype.resolve`：等 Host 解析完成后，按当前 Agent 的策略把隐藏名从 `view()` 投影中剔除；`dispose()` 原样转发。包装只替换 `view`，失败一律返回 Host 原对象，卸载时还原；旧版 DSH 没有 `resolve()`，自动跳过并沿用提示词过滤。这样 `subagent`、`schedule_*` 等 scope-local 工具与全局工具表现一致。
+
 ### 2.3 每个模型 step 都重新组装工具目录
 
 Agent loop 在 `preStep()` 中**先** `systemPrompt.assemble()`，**再**跑 `agent/pre-step` waterfall。因此：
@@ -152,7 +160,8 @@ interface ToolManagerSettings {
 - 没有按需组的 Preset 用 `restrict({ deny: ['tool_list'] })` 隐藏它，避免无关会话看到空的 discovery 工具；
 - 只对 baseline 中真实存在的名字构造 deny；
 - 监听 `tools/change`：先暂时卸下 restriction 再重读 baseline，避免把已隐藏的工具当成“已消失”；刷新期间抑制重入，防止自己的 restrict/register 再次触发刷新；
-- 若仍撞上 unknown-name 错误，从诊断文本解析 `known global tools` 后重试交集。
+- 若仍撞上 unknown-name 错误，从诊断文本解析 `known global tools` 后重试交集；
+- scope-local 名无法用 `restrict()` 隐藏：0.2.2 之前由提示词过滤兜底，0.2.2 起改由 `tools.resolve()` 的 per-step 过滤兜底（见 2.2.1）；两者都失效时保留 guard 拦截并告警一次。
 
 ### 4.4 PTC 模式需单独定义产品语义
 

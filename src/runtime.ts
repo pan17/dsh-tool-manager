@@ -44,6 +44,25 @@ export class ToolPolicyRuntime {
   private mutating = false;
   private refreshQueued = false;
   private discoveryDisposer?: () => void;
+  /**
+   * Whether `system-prompt/assemble` still owns the tool declarations.
+   * DSH < 0.2.2 hands over a PromptAssembly (declarations included);
+   * DSH >= 0.2.2 hands over a PromptPresentation and re-attaches the
+   * provider's declarations after the waterfall. Undefined until the first
+   * assembly with something to hide is observed.
+   */
+  private declarationFiltering: boolean | undefined;
+  /** Names `restrict()` refused because they are not global tools. */
+  private readonly unrestrictable = new Set<string>();
+  private warnedUnrestrictable = false;
+  /**
+   * Whether this Host filters the per-step admitted set.
+   * DSH >= 0.2.2 derives declarations, PTC bindings, and execution lookup from
+   * `tools.resolve()`, which is the only seam that can hide a registration made
+   * in the Agent's own scope. `undefined` on older Hosts (no `resolve`).
+   */
+  private stepFilter: "installed" | "failed" | undefined;
+  private restoreStepFilter?: () => void;
 
   constructor(
     private readonly ctx: ContextLike,
@@ -55,6 +74,7 @@ export class ToolPolicyRuntime {
 
   start(): void {
     this.registerDiscovery();
+    this.installStepFilter();
     const agents = this.ctx.get<{ list(): AgentLike[] }>("agents");
     for (const agent of agents?.list() ?? []) this.install(agent);
 
@@ -182,17 +202,30 @@ export class ToolPolicyRuntime {
       const next = args.at(-1);
       if (typeof next !== "function") return args[0];
       const assembly = await (next as () => Promise<unknown>)();
-      if (!isPromptAssembly(assembly)) return assembly;
+      if (!isPromptPresentation(assembly)) return assembly;
       const hidden = new Set(denyNames(this.policy(state.agent), state.baseline, state.exposures));
       if (hidden.size === 0) return assembly;
-      return {
-        ...assembly,
-        tools: assembly.tools.filter((schema) => !hidden.has(schema.name)),
-        sections: assembly.sections.filter((section) => {
-          const toolName = section.name.startsWith("tool:") ? section.name.slice("tool:".length) : undefined;
-          return toolName === undefined || !hidden.has(toolName);
-        }),
-      };
+      // DSH < 0.2.2: the waterfall receives a PromptAssembly and the returned
+      // tool list is authoritative, so hiding declarations here works.
+      // DSH >= 0.2.2: it receives a PromptPresentation (sections/contexts/
+      // variables) and the provider's declarations are re-attached AFTER the
+      // waterfall, so only section text can still be filtered. The guard keeps
+      // blocking the call itself either way.
+      if (Array.isArray(assembly.tools)) {
+        this.declarationFiltering = true;
+      } else {
+        this.declarationFiltering = false;
+        this.warnUnrestrictable();
+      }
+      const sections = assembly.sections.filter((section) => {
+        const toolName = section.name.startsWith("tool:") ? section.name.slice("tool:".length) : undefined;
+        return toolName === undefined || !hidden.has(toolName);
+      });
+      const filtered: PromptPresentationLike = { ...assembly, sections };
+      if (Array.isArray(assembly.tools)) {
+        filtered.tools = assembly.tools.filter((schema) => !hidden.has(schema.name));
+      }
+      return filtered;
     }) as (() => void) | undefined;
   }
 
@@ -291,8 +324,7 @@ export class ToolPolicyRuntime {
     }
   }
 
-  private discoveryDefinition(): unknown {
-    return {
+  private discoveryDefinition(): unknown {    return {
       name: DISCOVERY_TOOL_NAME,
       description:
         "Open one on-demand tool group by exact name from this session's tool-group catalog. All tools in that group become available for the rest of this session.",
@@ -321,6 +353,68 @@ export class ToolPolicyRuntime {
         return this.openGroup(agent, args.group);
       },
     };
+  }
+
+  /**
+   * Hide the policy's names from every per-step tool set.
+   *
+   * DSH 0.2.2 builds each step's admitted set from `tools.resolve()`, then
+   * derives the model-facing declarations, the PTC bindings, and execution
+   * lookup from it. Unlike `restrict()`, that set is NOT exempting the Agent's
+   * own registrations, so this is the only seam able to hide a tool another
+   * plugin registered into `agent.ctx` — the exact behaviour the prompt
+   * waterfall provided before 0.2.2.
+   *
+   * The seam is a method on the shared `ToolsService` prototype, so one patch
+   * covers the host service and every Agent-scoped derivation of it. Every
+   * failure path returns the untouched set: a wrong guess here must degrade to
+   * "visible but still blocked by the guard", never to a broken step.
+   */
+  private installStepFilter(): void {
+    const tools = this.hostTools();
+    if (!tools) return;
+    const owner = methodOwner(tools, "resolve");
+    if (!owner) return;
+    const current = owner.resolve;
+    if (typeof current !== "function") return;
+    if ((current as PatchedMethod)[STEP_FILTER_MARK]) {
+      this.stepFilter = "installed";
+      return;
+    }
+    const runtime = this;
+    const patched = (async function (this: unknown, ...args: unknown[]): Promise<unknown> {
+      const set = await (current as (...inputs: unknown[]) => Promise<unknown>).apply(this, args);
+      return runtime.filterStepToolSet(args[0], set);
+    }) as PatchedMethod;
+    patched[STEP_FILTER_MARK] = true;
+    try {
+      owner.resolve = patched;
+      this.restoreStepFilter = () => {
+        owner.resolve = current;
+      };
+      this.stepFilter = "installed";
+    } catch (error) {
+      this.stepFilter = "failed";
+      this.warn(
+        `tool-manager could not filter the per-step tool set (${errorMessage(error)}); tools registered in the Agent's own scope stay visible to the model`,
+      );
+    }
+  }
+
+  /** Remove this Agent's hidden names from one resolved step set. */
+  private filterStepToolSet(context: unknown, set: unknown): unknown {
+    try {
+      const agent = asCreated(context)?.agent;
+      if (!agent) return set;
+      const state = this.states.get(agent);
+      if (!state) return set;
+      if (!isStepToolSet(set)) return set;
+      const hidden = denyNames(this.policy(agent), state.baseline, state.exposures);
+      if (hidden.length === 0) return set;
+      return filterStepToolSet(set, new Set(hidden));
+    } catch {
+      return set;
+    }
   }
 
   private reconcile(state: AgentState): void {
@@ -352,6 +446,8 @@ export class ToolPolicyRuntime {
         return undefined;
       }
       const next = deny.filter((name) => known.has(name));
+      const unrestrictable = deny.filter((name) => !known.has(name));
+      if (unrestrictable.length > 0) this.noteUnrestrictable(unrestrictable);
       if (next.length === 0) return undefined;
       try {
         return scopedTools.restrict({ deny: next });
@@ -362,12 +458,41 @@ export class ToolPolicyRuntime {
     }
   }
 
+  /**
+   * Remember names `restrict()` refused because they are not global tools.
+   *
+   * These are registrations owned by the Agent's own scope (delegation and
+   * scheduled-task tools are the common ones). DSH < 0.2.2 still hid them by
+   * filtering the prompt assembly; DSH >= 0.2.2 cannot, so the call guard is
+   * the only remaining enforcement and the model keeps seeing the name.
+   */
+  private noteUnrestrictable(names: readonly string[]): void {
+    for (const name of names) this.unrestrictable.add(name);
+    this.warnUnrestrictable();
+  }
+
+  /** Explain the remaining limitation once, and only when it actually bites. */
+  private warnUnrestrictable(): void {
+    if (this.declarationFiltering !== false || this.warnedUnrestrictable) return;
+    // The per-step filter already removes these names from everything the
+    // model sees, so there is nothing to report.
+    if (this.stepFilter === "installed") return;
+    if (this.unrestrictable.size === 0) return;
+    this.warnedUnrestrictable = true;
+    const names = [...this.unrestrictable].sort();
+    this.warn(
+      `tool-manager: this DSH builds the system prompt without tool declarations, so ${names.length} Agent-scoped tool(s) — ${names.join(", ")} — stay visible to the model even when disabled or assigned to an on-demand group. Calls are still blocked by the tool-manager guard; only tools registered outside the Agent's own scope can be hidden from the prompt.`,
+    );
+  }
+
   private warn(message: string): void {
     const logger = this.ctx.get<{ warn?(format: unknown, ...rest: unknown[]): void }>("logger");
     logger?.warn?.(message);
   }
 
   async dispose(): Promise<void> {
+    this.restoreStepFilter?.();
+    this.restoreStepFilter = undefined;
     for (const agent of [...this.states.keys()]) this.uninstall(agent);
     this.mutating = true;
     try {
@@ -386,20 +511,83 @@ function asCreated(value: unknown): { agent: AgentLike } | undefined {
   return { agent };
 }
 
+/** Cross-reload marker: two wrappers must never stack on one Host. */
+const STEP_FILTER_MARK = Symbol.for("dsh-tool-manager.step-filter");
+
+type PatchedMethod = ((this: unknown, ...args: unknown[]) => Promise<unknown>) & Record<symbol, unknown>;
+
+/** One step's admitted registrations, as `tools.resolve()` returns it. */
+interface StepToolSetLike {
+  dispose(): void;
+  view(scope?: unknown): ReadonlyMap<string, unknown>;
+}
+
+function isStepToolSet(value: unknown): value is StepToolSetLike {
+  if (value === null || typeof value !== "object") return false;
+  const record = value as { view?: unknown; dispose?: unknown };
+  return typeof record.view === "function" && typeof record.dispose === "function";
+}
+
+/**
+ * Re-project one step set without the hidden names.
+ *
+ * Everything downstream — prompt declarations, PTC bindings, and the
+ * executable lookup — reads this map, so dropping a registration here is the
+ * 0.2.2 equivalent of removing it from the prompt assembly.
+ */
+function filterStepToolSet(set: StepToolSetLike, hidden: ReadonlySet<string>): StepToolSetLike {
+  return {
+    dispose: () => set.dispose(),
+    view(scope?: unknown) {
+      const view = set.view(scope);
+      const kept = new Map<string, unknown>();
+      for (const [name, definition] of view) {
+        if (!hidden.has(name)) kept.set(name, definition);
+      }
+      return kept;
+    },
+  };
+}
+
+/**
+ * The object in `value`'s prototype chain that owns `name`.
+ *
+ * Services in Cordis derive per-context instances with `Object.create(service)`,
+ * so the owning prototype is the single place a patch reaches every Agent.
+ */
+function methodOwner(value: unknown, name: string): Record<string, unknown> | undefined {
+  let owner = value as object | null;
+  while (owner !== null && owner !== Object.prototype) {
+    if (Object.prototype.hasOwnProperty.call(owner, name)) return owner as Record<string, unknown>;
+    owner = Object.getPrototypeOf(owner) as object | null;
+  }
+  return undefined;
+}
+
 function isEnterDecision(value: unknown): value is { kind: "enter"; messages: unknown[] } {
   if (value === null || typeof value !== "object") return false;
   const record = value as { kind?: unknown; messages?: unknown };
   return record.kind === "enter" && Array.isArray(record.messages);
 }
 
-function isPromptAssembly(value: unknown): value is {
-  tools: ToolSchemaLike[];
+/**
+ * One assembly as the waterfall receives it.
+ *
+ * `tools` is present on DSH < 0.2.2 (`PromptAssembly`) and absent from
+ * 0.2.2 onward (`PromptPresentation`), where the tool registry re-attaches the
+ * declarations after the waterfall. Everything else (sections, contexts,
+ * variables) survives both shapes.
+ */
+interface PromptPresentationLike {
   sections: Array<{ name: string; [key: string]: unknown }>;
+  tools?: ToolSchemaLike[];
   [key: string]: unknown;
-} {
+}
+
+function isPromptPresentation(value: unknown): value is PromptPresentationLike {
   if (value === null || typeof value !== "object") return false;
-  const record = value as { tools?: unknown; sections?: unknown };
-  return Array.isArray(record.tools) && Array.isArray(record.sections);
+  const record = value as { sections?: unknown };
+  return Array.isArray(record.sections);
 }
 
 function errorMessage(error: unknown): string {
