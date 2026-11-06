@@ -551,3 +551,49 @@ describe("ToolPolicyRuntime restart recovery", () => {
     await runtime.dispose();
   });
 });
+
+describe("ToolPolicyRuntime registry reload", () => {
+  it("follows the live registry, forgets its observations, and keeps the policy", async () => {
+    const denies = [];
+    const scopedSchemas = ["read", "subagent"].map((name) => ({ name, description: name, parameters: {} }));
+    const scopedTools = {
+      schemas() { return scopedSchemas; },
+      register() { return () => {}; },
+      restrict(filter) { denies.push(filter.deny); return () => {}; },
+    };
+    const agent = {
+      ctx: { get(name) { return name === "tools" ? scopedTools : undefined; }, on() { return () => {}; } },
+      session: resumedSession(),
+    };
+    const context = {
+      get(name) {
+        if (name === "tools") return { schemas: () => [], register: () => () => {}, restrict: () => () => {} };
+        if (name === "agents") return { list: () => [agent] };
+        if (name === "logger") return { warn() {} };
+        return undefined;
+      },
+      on() {},
+    };
+    const seen = [];
+    let instance = { composedPreset() { seen.push("first"); return "standard"; } };
+
+    const runtime = new ToolPolicyRuntime(context, () => instance, {
+      presets: { standard: { disabled: ["subagent"], groups: [] } },
+    });
+    runtime.start();
+    assert.deepEqual(runtime.observedSchemasFor("standard").map((item) => item.name), ["read", "subagent"]);
+    assert.deepEqual(denies.at(-1), ["subagent"]);
+
+    // DSH republished the registry: the new instance has no bindings yet, and
+    // preset ids from the retired one no longer name a composition it owns.
+    instance = { composedPreset() { seen.push("second"); return undefined; } };
+    runtime.update({ presets: { standard: { disabled: ["subagent"], groups: [] } } });
+
+    assert.equal(seen.at(-1), "second");
+    assert.deepEqual(runtime.observedSchemasFor("standard"), []);
+    // A Session DSH can no longer report a preset for keeps the policy it was
+    // running under: silently re-enabling every disabled tool is worse.
+    assert.deepEqual(denies.at(-1), ["subagent"]);
+    await runtime.dispose();
+  });
+});

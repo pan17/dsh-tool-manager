@@ -2,21 +2,24 @@ import type {
   AgentDefaultModelLike,
   AgentLike,
   AgentPresetsLike,
+  AgentPresetsSource,
   ContextLike,
   LlmRuntimeLike,
   ToolRuntimeLike,
   ToolSchemaLike,
 } from "./dsh.js";
-import { asRecord, schemasForPreset } from "./dsh.js";
+import { asRecord, resolvePresets, schemasForPreset } from "./dsh.js";
 import { CompositionWatch } from "./composition-watch.js";
 import { ToolManagerConfigStore } from "./config.js";
 import { groupPolicyIssues, matchesAnyPattern, normalizeSettings, policyFor } from "./policy.js";
+import { userNotices } from "./notices.js";
 import { ToolPolicyRuntime } from "./runtime.js";
 import { buildSnapshot, mergeSchemas } from "./snapshot.js";
 import {
   DISCOVERY_TOOL_NAME,
   PTC_TRANSPORT_NAME,
   TOOL_MANAGER_PROBE_SESSION_ID,
+  type ToolManagerSnapshot,
 } from "./types.js";
 import {
   generateAutoGroups,
@@ -84,10 +87,12 @@ export class PresetSchemaProbe {
   private initialization?: Promise<AgentHandleLike | undefined>;
   private queue: Promise<void> = Promise.resolve();
   private disposed = false;
+  /** The registry instance this probe's Agent is bound to. */
+  private boundTo?: AgentPresetsLike;
 
   constructor(
     private readonly context: ContextLike,
-    private readonly presets: AgentPresetsLike,
+    private readonly presets: AgentPresetsSource,
   ) {}
 
   inspect(presetId: string): Promise<ToolSchemaLike[]> {
@@ -101,10 +106,13 @@ export class PresetSchemaProbe {
 
   private async inspectSerial(presetId: string): Promise<ToolSchemaLike[]> {
     if (this.disposed) return [];
-    const handle = await this.ensure(presetId);
+    const presets = resolvePresets(this.presets);
+    if (!presets) return [];
+    await this.rebind(presets);
+    const handle = await this.ensure(presets, presetId);
     if (!handle) return [];
-    if (this.presets.composedPreset(handle.agent.ctx) !== presetId) {
-      await this.presets.recompose(handle.agent.ctx, presetId);
+    if (presets.composedPreset(handle.agent.ctx) !== presetId) {
+      await presets.recompose(handle.agent.ctx, presetId);
       // Dynamic preset plugins reconcile Agent-scoped registrations from the
       // tools/change event emitted by recompose(). Some disposals complete on
       // the next event-loop turn, so reading immediately can leak the previous
@@ -114,10 +122,29 @@ export class PresetSchemaProbe {
     return handle.agent.ctx.get<ToolRuntimeLike>("tools")?.schemas(handle.agent) ?? [];
   }
 
-  private async ensure(initialPresetId: string): Promise<AgentHandleLike | undefined> {
+  /**
+   * Rebuild the probe Agent when DSH replaced the registry underneath it.
+   *
+   * The probe Session's scope parent names a generation of the retired
+   * instance, which the new one does not know: `recompose()` there would leave
+   * the Agent on a composition no live registry owns. Composing a fresh Agent
+   * against the new instance is what re-binds it.
+   */
+  private async rebind(presets: AgentPresetsLike): Promise<void> {
+    if (this.boundTo === presets) return;
+    this.boundTo = presets;
+    const handle = this.handle;
+    this.handle = undefined;
+    if (handle) await handle.dispose().catch(() => undefined);
+  }
+
+  private async ensure(
+    presets: AgentPresetsLike,
+    initialPresetId: string,
+  ): Promise<AgentHandleLike | undefined> {
     if (this.handle) return this.handle;
     if (!this.initialization) {
-      this.initialization = this.initialize(initialPresetId).then(async (handle) => {
+      this.initialization = this.initialize(presets, initialPresetId).then(async (handle) => {
         if (!handle) return undefined;
         if (this.disposed) {
           await handle.dispose().catch(() => undefined);
@@ -132,13 +159,16 @@ export class PresetSchemaProbe {
     return this.initialization;
   }
 
-  private async initialize(initialPresetId: string): Promise<AgentHandleLike | undefined> {
+  private async initialize(
+    presets: AgentPresetsLike,
+    initialPresetId: string,
+  ): Promise<AgentHandleLike | undefined> {
     const agents = this.context.get<AgentRegistryLike>("agents");
     const persistence = this.context.get<SessionPersistenceLike>("sessionPersistence");
     if (!agents || !persistence) return undefined;
 
     const setup = async (agentCtx: ContextLike) => {
-      await this.presets.mount(agentCtx, initialPresetId);
+      await presets.mount(agentCtx, initialPresetId);
     };
     const existing = await persistence.stat(TOOL_MANAGER_PROBE_SESSION_ID);
     if (existing) {
@@ -194,11 +224,11 @@ export class PresetSchemaProbe {
  * presets it can compose, and the next call retries.
  */
 export class DefaultPresetMount {
-  private attempt?: Promise<void>;
-  private ready = false;
+  private attempt?: { presets: AgentPresetsLike; task: Promise<void> };
+  private readyOn?: AgentPresetsLike;
 
   constructor(
-    private readonly presets: AgentPresetsLike,
+    private readonly presets: AgentPresetsSource,
     private readonly warn: (message: string) => void,
   ) {}
 
@@ -207,20 +237,29 @@ export class DefaultPresetMount {
    * composing attempt settled, or immediately when it already did.
    */
   async ensure(): Promise<void> {
-    if (this.ready) return;
-    this.attempt ??= this.compose();
-    await this.attempt;
+    const presets = resolvePresets(this.presets);
+    if (!presets) return;
+    // Readiness is per registry instance. DSH replaces the instance when the
+    // registry node reloads, and the new one owns none of the standing
+    // compositions the retired one was measured on.
+    if (this.readyOn === presets) return;
+    if (this.attempt?.presets === presets) return this.attempt.task;
+    const attempt = { presets, task: this.compose(presets) };
+    this.attempt = attempt;
+    try {
+      await attempt.task;
+    } finally {
+      if (this.attempt === attempt) this.attempt = undefined;
+    }
   }
 
-  private async compose(): Promise<void> {
+  private async compose(presets: AgentPresetsLike): Promise<void> {
     try {
-      const lease = await this.presets.acquireScope(undefined);
+      const lease = await presets.acquireScope(undefined);
       await lease[Symbol.asyncDispose]();
-      this.ready = true;
+      this.readyOn = presets;
     } catch (error) {
       this.warn(`tool-manager could not compose the default agent preset before other presets: ${errorMessage(error)}`);
-    } finally {
-      this.attempt = undefined;
     }
   }
 }
@@ -237,7 +276,7 @@ export interface PresetCatalog {
 
 export interface PresetCatalogOptions {
   context: ContextLike;
-  presets: AgentPresetsLike;
+  presets: AgentPresetsSource;
   probe: PresetSchemaProbe;
   defaultPreset: DefaultPresetMount;
   /** Schemas observed on live Agents of one Preset, without probing. */
@@ -262,6 +301,23 @@ export function createPresetCatalog(options: PresetCatalogOptions): PresetCatalo
   // sample cannot make a real tool alternate between present and orphaned.
   const catalogedSchemas = new Map<string, ToolSchemaLike[]>();
   const pendingCatalogs = new Map<string, Promise<ToolSchemaLike[]>>();
+  let instance: AgentPresetsLike | undefined;
+
+  /**
+   * Read the live registry, dropping what the retired instance taught us.
+   *
+   * A reloaded registry mounts new standing compositions: a schema proven on
+   * the old instance describes a composition nothing owns any more, and the
+   * Preset ids it was keyed by may not even exist in the new roster.
+   */
+  const readPresets = (): AgentPresetsLike | undefined => {
+    const next = resolvePresets(presets);
+    if (next === instance) return next;
+    instance = next;
+    catalogedSchemas.clear();
+    pendingCatalogs.clear();
+    return next;
+  };
 
   const remember = (presetId: string, schemas: readonly ToolSchemaLike[]): ToolSchemaLike[] => {
     const merged = mergeSchemas(catalogedSchemas.get(presetId) ?? [], schemas);
@@ -270,7 +326,8 @@ export function createPresetCatalog(options: PresetCatalogOptions): PresetCatalo
   };
 
   const catalogSchemas = async (presetId: string): Promise<ToolSchemaLike[]> => {
-    const live = livePresetSchemas(context, presets, presetId);
+    const current = readPresets();
+    const live = current ? livePresetSchemas(context, current, presetId) : undefined;
     if (live) return remember(presetId, live);
     await defaultPreset.ensure();
     let pending = pendingCatalogs.get(presetId);
@@ -288,7 +345,9 @@ export function createPresetCatalog(options: PresetCatalogOptions): PresetCatalo
       await catalogSchemas(presetId);
     },
     ensureAll: async () => {
-      const inventory = await presets.compositionInventory();
+      const current = readPresets();
+      if (!current) return;
+      const inventory = await current.compositionInventory();
       await Promise.all(inventory.filter((item) => !item.broken).map((item) => catalogSchemas(item.id)));
     },
   };
@@ -296,24 +355,49 @@ export function createPresetCatalog(options: PresetCatalogOptions): PresetCatalo
 
 export function apply(ctx: unknown): void {
   const context = ctx as ContextLike;
-  const presets = context.get<AgentPresetsLike>("agentPresets");
-  const tools = context.get<ToolRuntimeLike>("tools");
-  if (!presets || !tools) {
+  /**
+   * Read the services on every use, never at load.
+   *
+   * DSH reloads a plugin node by re-applying it on the same Fiber, which
+   * constructs a new service instance: the preset registry publishes a fresh
+   * `definitions` map that every preset re-registers into, and the retired
+   * instance keeps the empty map its unregister disposers left. A reference
+   * captured here would answer "no Presets" for the rest of the Host run, and
+   * `composedPreset()` would return `undefined` for every Agent — silently
+   * dropping that Agent's policy — until DSH is restarted.
+   */
+  const presetsSource = (): AgentPresetsLike | undefined =>
+    context.get<AgentPresetsLike>("agentPresets");
+  const toolsSource = (): ToolRuntimeLike | undefined => context.get<ToolRuntimeLike>("tools");
+  if (!presetsSource() || !toolsSource()) {
     throw new Error("dsh-tool-manager requires agentPresets, agents, and tools");
   }
 
+  /** The services one request reads, or `undefined` while DSH swaps them. */
+  const services = (): { presets: AgentPresetsLike; tools: ToolRuntimeLike } | undefined => {
+    const presets = presetsSource();
+    const tools = toolsSource();
+    return presets && tools ? { presets, tools } : undefined;
+  };
+
   const config = new ToolManagerConfigStore();
-  const runtime = new ToolPolicyRuntime(context, presets, config.get());
+  const notices = userNotices();
+  const runtime = new ToolPolicyRuntime(
+    context,
+    presetsSource,
+    config.get(),
+    (notice) => notices.add(notice),
+  );
   runtime.start();
-  const probe = new PresetSchemaProbe(context, presets);
-  const defaultPreset = new DefaultPresetMount(presets, (message) => warn(context, message));
+  const probe = new PresetSchemaProbe(context, presetsSource);
+  const defaultPreset = new DefaultPresetMount(presetsSource, (message) => warn(context, message));
   // Compose the default preset now, not on the first page load: the composition
   // mounted first owns the reconciliation order every later mode switch needs,
   // and a Session resumed in another preset would otherwise take that place.
   void defaultPreset.ensure();
   const catalog = createPresetCatalog({
     context,
-    presets,
+    presets: presetsSource,
     probe,
     defaultPreset,
     observed: (presetId) => runtime.observedSchemasFor(presetId),
@@ -325,9 +409,9 @@ export function apply(ctx: unknown): void {
   // re-calibrates any Session whose mode changed, whatever plugin lost the race
   // for which tool names (see composition-watch.ts).
   const compositionWatch = new CompositionWatch({
-    presets,
+    presets: presetsSource,
     agents: () => context.get<AgentRegistryLike>("agents")?.list() ?? [],
-    tools: () => tools,
+    tools: toolsSource,
     probe: (presetId) => probe.inspect(presetId),
     explainedLoss: (presetId, toolName) => {
       // This plugin's own tools, plus every name its policy hides on purpose:
@@ -339,6 +423,19 @@ export function apply(ctx: unknown): void {
       return policy.groups.some((group) => matchesAnyPattern(toolName, group.patterns));
     },
     excludeAgentId: TOOL_MANAGER_PROBE_SESSION_ID,
+    onReloaded: (agent, presetId) => {
+      // Re-attaching happens on the Session's next step; this only makes the
+      // reader aware early, and is dropped again once a repair succeeds.
+      notices.add({
+        kind: "reloading",
+        ...(agent.id === undefined ? {} : { sessionId: agent.id }),
+        presetId,
+        message:
+          `agent preset 注册表刚被重载：会话「${agent.id ?? "未知"}」的 preset ${presetId} 绑定失效，` +
+          "插件会在该会话下一次对话前自动重新挂载（不需要重启）。" +
+          "如果下一步工具仍然缺失，这里会出现一条需要重启 DSH 的提示。",
+      });
+    },
     warn: (message) => warn(context, message),
     info: (message) => info(context, message),
   });
@@ -348,6 +445,21 @@ export function apply(ctx: unknown): void {
     const webServer = webCtx.get<WebServer>("webServer");
     if (!webServer) return;
 
+    /** Build a snapshot from whatever services are live at this moment. */
+    const buildCurrentSnapshot = (): Promise<ToolManagerSnapshot> => {
+      const live = services();
+      if (!live) throw new Error(SERVICE_RELOADING);
+      return buildSnapshot(live.presets, live.tools, config.get(), config.revision, config.path, catalog.schemasFor);
+    };
+
+    /**
+     * The registry instance whose empty roster this plugin already waited out.
+     *
+     * A deployment that genuinely declares no Preset must not pay the wait on
+     * every page load, while every newly published instance gets one wait.
+     */
+    let rosterSettled: AgentPresetsLike | undefined;
+
     webServer.register({
       kind: "exact",
       path: "/tool-manager/api/snapshot",
@@ -356,9 +468,29 @@ export function apply(ctx: unknown): void {
           sendJson(res, 405, { ok: false, message: "method not allowed" });
           return;
         }
-        void ensureAllPresetSchemas().then(
-          () => buildSnapshot(presets, tools, config.get(), config.revision, config.path, catalog.schemasFor),
-        ).then(
+        if (!services()) {
+          sendJson(res, 503, { ok: false, message: SERVICE_RELOADING });
+          return;
+        }
+        void (async () => {
+          let snapshot = await ensureAllPresetSchemas().then(buildCurrentSnapshot);
+          // The reload window: DSH publishes the new registry before every
+          // preset node has re-registered into it, and this plugin's own node
+          // may come back first. A page opened in that gap would otherwise show
+          // "no Agent Preset" until the user reloaded it by hand.
+          const instance = services()?.presets;
+          if (snapshot.presets.length === 0 && instance !== undefined && instance !== rosterSettled) {
+            for (let waited = 0; waited < ROSTER_SETTLE_MS; waited += ROSTER_POLL_MS) {
+              await delay(ROSTER_POLL_MS);
+              if (!services()) break;
+              await ensureAllPresetSchemas();
+              snapshot = await buildCurrentSnapshot();
+              if (snapshot.presets.length > 0) break;
+            }
+            rosterSettled = services()?.presets ?? rosterSettled;
+          }
+          return snapshot;
+        })().then(
           (snapshot) => sendJson(res, 200, snapshot),
           (error) => sendJson(res, 500, { ok: false, message: errorMessage(error) }),
         );
@@ -374,6 +506,8 @@ export function apply(ctx: unknown): void {
           return;
         }
         void (async () => {
+          const live = services();
+          if (!live) throw new Error(SERVICE_RELOADING);
           const llm = context.get<LlmRuntimeLike>("llm");
           const defaultModel = context.get<AgentDefaultModelLike>("agentDefaultModel");
           if (!llm || !defaultModel) {
@@ -382,10 +516,10 @@ export function apply(ctx: unknown): void {
           const body = asRecord(await readJsonBody(req));
           const presetId = typeof body?.presetId === "string" ? body.presetId.trim() : "";
           if (!presetId) throw new Error("presetId is required");
-          const inventory = await presets.compositionInventory();
+          const inventory = await live.presets.compositionInventory();
           if (!inventory.some((item) => item.id === presetId)) throw new Error(`unknown preset ${JSON.stringify(presetId)}`);
           await defaultPreset.ensure();
-          const standing = await schemasForPreset(presets, tools, presetId);
+          const standing = await schemasForPreset(live.presets, live.tools, presetId);
           const schemas = mergeSchemas(standing, await catalog.schemasFor(presetId))
             .filter((schema) => schema.name !== DISCOVERY_TOOL_NAME && schema.name !== PTC_TRANSPORT_NAME);
           const selected = selectSuggestionTools(schemas, body?.toolNames);
@@ -412,6 +546,8 @@ export function apply(ctx: unknown): void {
           return;
         }
         void (async () => {
+          const live = services();
+          if (!live) throw new Error(SERVICE_RELOADING);
           const llm = context.get<LlmRuntimeLike>("llm");
           const defaultModel = context.get<AgentDefaultModelLike>("agentDefaultModel");
           if (!llm || !defaultModel) {
@@ -420,10 +556,10 @@ export function apply(ctx: unknown): void {
           const body = asRecord(await readJsonBody(req));
           const presetId = typeof body?.presetId === "string" ? body.presetId.trim() : "";
           if (!presetId) throw new Error("presetId is required");
-          const inventory = await presets.compositionInventory();
+          const inventory = await live.presets.compositionInventory();
           if (!inventory.some((item) => item.id === presetId)) throw new Error(`unknown preset ${JSON.stringify(presetId)}`);
           await defaultPreset.ensure();
-          const standing = await schemasForPreset(presets, tools, presetId);
+          const standing = await schemasForPreset(live.presets, live.tools, presetId);
           const schemas = mergeSchemas(standing, await catalog.schemasFor(presetId))
             .filter((schema) => schema.name !== DISCOVERY_TOOL_NAME && schema.name !== PTC_TRANSPORT_NAME);
           const selected = selectSuggestionTools(schemas, body?.toolNames);
@@ -443,6 +579,38 @@ export function apply(ctx: unknown): void {
 
     webServer.register({
       kind: "exact",
+      path: "/tool-manager/api/repair",
+      handler: (_req, res) => {
+        sendJson(res, 200, { ...runtime.repairDiagnostics(), presets: presetsSource() !== undefined });
+      },
+    });
+
+    webServer.register({
+      kind: "exact",
+      path: "/tool-manager/api/notices",
+      handler: (req, res) => {
+        const method = String(req.method ?? "GET").toUpperCase();
+        if (method === "GET") {
+          sendJson(res, 200, { notices: notices.list() });
+          return;
+        }
+        if (method !== "POST") {
+          sendJson(res, 405, { ok: false, message: "method not allowed" });
+          return;
+        }
+        void (async () => {
+          const body = asRecord(await readJsonBody(req));
+          const ids = Array.isArray(body?.ids)
+            ? body.ids.filter((id): id is string => typeof id === "string")
+            : [];
+          notices.ack(ids);
+          sendJson(res, 200, { notices: notices.list() });
+        })().catch((error: unknown) => sendJson(res, 400, { ok: false, message: errorMessage(error) }));
+      },
+    });
+
+    webServer.register({
+      kind: "exact",
       path: "/tool-manager/api/save",
       handler: (req, res) => {
         if (String(req.method ?? "POST").toUpperCase() !== "POST") {
@@ -450,6 +618,8 @@ export function apply(ctx: unknown): void {
           return;
         }
         void (async () => {
+          const live = services();
+          if (!live) throw new Error(SERVICE_RELOADING);
           const body = asRecord(await readJsonBody(req));
           const expectedRevision = body && typeof body.expectedRevision === "number"
             ? body.expectedRevision
@@ -462,18 +632,18 @@ export function apply(ctx: unknown): void {
           // group built from those tools is rejected as empty although the page
           // lists them and the runtime opens them normally.
           await assertNoEmptyGroups(
-            presets,
-            tools,
+            live.presets,
+            live.tools,
             next,
             () => defaultPreset.ensure(),
-            (presetId) => visiblePresetToolNames(presets, tools, catalog, presetId),
+            (presetId) => visiblePresetToolNames(live.presets, live.tools, catalog, presetId),
           );
           await config.replace(next, expectedRevision);
           runtime.update(config.get());
           // `buildSnapshot` mounts every inspectable preset, so the default must
           // already be composed before it runs (see DefaultPresetMount).
           await defaultPreset.ensure();
-          return buildSnapshot(presets, tools, config.get(), config.revision, config.path, catalog.schemasFor);
+          return buildCurrentSnapshot();
         })().then(
           (snapshot) => sendJson(res, 200, snapshot),
           (error) => sendJson(res, 400, { ok: false, message: errorMessage(error) }),
@@ -589,6 +759,24 @@ export async function assertNoEmptyGroups(
 
 function nextEventLoopTurn(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
+}
+
+/** Answer while DSH holds no instance of a service this plugin reads. */
+const SERVICE_RELOADING = "the agent preset registry is reloading; retry in a moment";
+
+/**
+ * How long the snapshot endpoint waits for a reloaded registry to finish
+ * re-registering its presets before it answers with an empty roster.
+ *
+ * A Preset node re-registers in its own Fiber, so the roster is filled in a
+ * different order than the service instance is published. Presets mount whole
+ * plugin trees, so the window is longer than one event-loop turn.
+ */
+const ROSTER_SETTLE_MS = 1500;
+const ROSTER_POLL_MS = 100;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function readJsonBody(req: HttpRequest): Promise<unknown> {

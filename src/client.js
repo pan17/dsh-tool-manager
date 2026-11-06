@@ -37,6 +37,8 @@ window.__ModuleLoader__.load({
 			".tm_modal_foot{padding:12px 16px 16px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.18));flex:0 0 auto}.tm_confirm_card{width:min(460px,100%)}.tm_timeout_field{display:flex;align-items:center;gap:8px}.tm_timeout_field .tm_input{max-width:120px;flex:0 0 120px}.tm_preview_body{padding-right:10px}.tm_preview_panel{flex:0 0 auto;overflow:visible}.tm_preview_meta{min-width:0;flex:1}.tm_preview_desc{margin-top:4px;white-space:normal;overflow-wrap:anywhere;word-break:break-word;color:var(--dsw-alias-label-secondary,#9097a4);font-size:12px;line-height:1.55}",
 			".tm_picker{min-height:180px;max-height:min(46vh,420px);overflow:auto;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.18));border-radius:8px;background:var(--dsw-alias-bg-layer-1,rgba(128,128,128,.06))}",
 			".tm_pick{display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.1))}.tm_pick:last-child{border-bottom:0}",
+			".tm_banner{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:10001;display:flex;align-items:flex-start;gap:14px;width:min(720px,calc(100vw - 32px));padding:12px 14px;border:1px solid #b45309;border-radius:12px;background:color-mix(in srgb,#f59e0b 18%,var(--dsw-alias-bg-base,#17191d));box-shadow:0 16px 48px rgba(0,0,0,.42);font-size:12px;line-height:1.55;color:var(--dsw-alias-label-primary,#e7e9ed)}",
+			".tm_banner_body{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}.tm_banner_line{overflow-wrap:anywhere}",
 		].join("");
 
 		function installCss() {
@@ -58,7 +60,14 @@ window.__ModuleLoader__.load({
 				...options,
 			}).then(async (response) => {
 				const body = await response.json().catch(() => ({}));
-				if (!response.ok) throw new Error(body.message || "HTTP " + response.status);
+				if (!response.ok) {
+					const error = new Error(body.message || "HTTP " + response.status);
+					// 503 means the Host is between service instances (a plugin
+					// node is reloading), which is worth retrying; every other
+					// status is an answer.
+					error.status = response.status;
+					throw error;
+				}
 				return body;
 			});
 		}
@@ -194,6 +203,49 @@ window.__ModuleLoader__.load({
 			].join("\n");
 		}
 
+		/**
+		 * Frame-wide banner for things the person must know and the model cannot fix.
+		 *
+		 * A registry reload can leave a Session without the preset tools it was
+		 * written against. When the Host cannot re-attach it, only a restart helps,
+		 * and that is a message for the reader: a transcript reminder only stops the
+		 * model from retrying, which is not the same as telling anyone.
+		 */
+		function ToolManagerNotices() {
+			const [notices, setNotices] = react.useState([]);
+			const [dismissing, setDismissing] = react.useState(false);
+
+			react.useEffect(() => {
+				let live = true;
+				const read = () => {
+					api("/notices")
+						.then((value) => { if (live) setNotices(Array.isArray(value.notices) ? value.notices : []); })
+						.catch(() => { /* a banner is not worth an error state */ });
+				};
+				read();
+				// Poll rather than stream: the Host writes a notice only when a
+				// registry reload failed to re-attach, which is rare and not urgent.
+				const timer = setInterval(read, 15000);
+				return () => { live = false; clearInterval(timer); };
+			}, []);
+
+			if (notices.length === 0) return null;
+			const dismiss = () => {
+				setDismissing(true);
+				api("/notices", { method: "POST", body: JSON.stringify({ ids: notices.map((item) => item.id) }) })
+					.then((value) => setNotices(Array.isArray(value.notices) ? value.notices : []))
+					.catch(() => { /* keep the banner rather than hide an unacknowledged notice */ })
+					.finally(() => setDismissing(false));
+			};
+
+			return h("div", { className: "tm_banner", role: "alert" },
+				h("div", { className: "tm_banner_body" },
+					notices.map((item) => h("div", { className: "tm_banner_line", key: item.id }, item.message)),
+				),
+				h("button", { className: "tm_btn", onClick: dismiss, disabled: dismissing }, dismissing ? "处理中…" : "知道了"),
+			);
+		}
+
 		function ToolManagerSection() {
 			const [snapshot, setSnapshot] = react.useState(null);
 			const [draft, setDraft] = react.useState(null);
@@ -212,13 +264,23 @@ window.__ModuleLoader__.load({
 			const [suggestionTimeoutSeconds, setSuggestionTimeoutSeconds] = react.useState("60");
 			const [autoGroupTimeoutSeconds, setAutoGroupTimeoutSeconds] = react.useState("120");
 
-			const load = react.useCallback(() => {
+			const load = react.useCallback((attempt) => {
+				const tries = attempt || 0;
 				setBusy(true); setError("");
 				return api("/snapshot").then((value) => {
 					const next = withGroupKeys(value);
 					setSnapshot(value); setDraft(next); setModal(null); setAutoPreview(null); setAutoGroupError("");
 					setActive((current) => current && value.presets.some((p) => p.id === current) ? current : (value.presets[0] && value.presets[0].id) || "");
-				}).catch((e) => setError(String(e.message || e))).finally(() => setBusy(false));
+				}).catch((e) => {
+					// The Host swaps the preset registry instance when its node
+					// reloads; retrying outlasts that window instead of leaving
+					// the page on an error the user cannot act on.
+					if (e && e.status === 503 && tries < 6) {
+						setTimeout(() => { load(tries + 1); }, 500);
+						return;
+					}
+					setError(String(e.message || e));
+				}).finally(() => setBusy(false));
 			}, []);
 			react.useEffect(() => { load(); }, [load]);
 			const dirty = !!(snapshot && draft && settingsSignature(snapshot) !== settingsSignature(draft));
@@ -923,6 +985,12 @@ window.__ModuleLoader__.load({
 				order: 25,
 				label: "工具管理",
 			}, ToolManagerSection));
+			// Outside the settings page on purpose: a lost tool set has to reach the
+			// reader wherever they are, not only if they open this plugin's section.
+			ctx.slots.inject("shell.overlay", () => ctx.slots.register({
+				name: "shell.overlay",
+				id: "tool-manager.notices",
+			}, ToolManagerNotices));
 		}
 
 		exports.apply = apply;

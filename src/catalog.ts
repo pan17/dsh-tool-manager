@@ -30,7 +30,6 @@ export interface CatalogUserMessage {
 export interface EnterDecision {
   kind: "enter";
   messages: CatalogUserMessage[];
-  [key: string]: unknown;
 }
 
 export function catalogEntriesFromGroups(
@@ -203,7 +202,8 @@ function escapeText(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
-function isEnterDecision(value: unknown): value is EnterDecision {
+/** Whether a model-step decision is the "enter" shape this plugin decorates. */
+export function isEnterDecision(value: unknown): value is EnterDecision {
   if (value === null || typeof value !== "object") return false;
   const record = value as { kind?: unknown; messages?: unknown };
   return record.kind === "enter" && Array.isArray(record.messages);

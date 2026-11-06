@@ -80,6 +80,17 @@ export interface PresetScopeLease {
 
 export interface AgentPresetsLike {
   composedPreset(agentCtx: ContextLike): string | undefined;
+  /**
+   * The preset one Session runs, read from the Session log rather than from
+   * this instance's Agent bindings.
+   *
+   * A registry instance binds an Agent's scope key when it composes that
+   * Agent; a replacement instance has no binding for Agents composed by the
+   * retired one, and `dsh-scope` forbids re-linking a key that already has a
+   * parent. The Session log still records the preset the Session runs, which is
+   * the only durable source once the binding is gone. Absent on older DSH.
+   */
+  presetForSession?(session: AgentSessionLike | undefined): string | null | undefined;
   compositionInventory(): Promise<PresetCompositionLike[]>;
   /**
    * Lease the standing preset revision so its registrations can be read
@@ -89,6 +100,50 @@ export interface AgentPresetsLike {
   acquireScope(id?: string): Promise<PresetScopeLease>;
   mount(agentCtx: ContextLike, id: string): Promise<unknown>;
   recompose(agentCtx: ContextLike, id: string): Promise<unknown>;
+}
+
+/**
+ * The live `agentPresets` service, or a resolver that reads it on every use.
+ *
+ * DSH re-applies a plugin node on its own Fiber to reload the node's config,
+ * and that constructs a NEW service instance: the registry's `definitions` map
+ * belongs to the instance, so every preset re-registers into the new one while
+ * the retired instance keeps the empty map its unregister disposers left.
+ * A consumer that captured the instance at load therefore answers from a
+ * retired roster for the rest of the Host run — an empty Preset list on the
+ * settings page, and `composedPreset()` returning `undefined` for every Agent.
+ * Long-lived consumers take a resolver instead and keep no instance.
+ */
+export type AgentPresetsSource = AgentPresetsLike | (() => AgentPresetsLike | undefined);
+
+/**
+ * Read one Preset-service source: a fixed instance, or the live one.
+ * @param source - the instance or resolver a consumer was given.
+ * @returns the service, or `undefined` while DSH has none provided.
+ */
+export function resolvePresets(source: AgentPresetsSource): AgentPresetsLike | undefined {
+  return typeof source === "function" ? source() : source;
+}
+
+/**
+ * The preset a Session runs, according to the Session log.
+ *
+ * Answers even when the live registry holds no binding for the Agent: the log
+ * records the preset the Session started in (and every selection since), while
+ * bindings belong to the instance that composed the Agent.
+ * @param presets - the live registry.
+ * @param agent - the Agent whose Session to read.
+ * @returns the preset id, or `undefined` when the Host cannot tell.
+ */
+export function presetForAgent(presets: AgentPresetsLike, agent: AgentLike): string | undefined {
+  const read = presets.presetForSession;
+  if (typeof read !== "function") return undefined;
+  try {
+    const declared = read.call(presets, agent.session);
+    return typeof declared === "string" && declared !== "" ? declared : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export interface PresetCompositionRowLike {

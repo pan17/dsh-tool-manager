@@ -74,6 +74,39 @@ Agent loop 在 `preStep()` 中**先** `systemPrompt.assemble()`，**再**跑 `ag
 
 设置页为了列出每个 Preset 的实际 schema，会对未 broken 的 Preset 调用 `acquireScope()`。这会租用 standing mount（与开一个该 Preset 的会话相同）并在读完 schema 后释放租约，但不会改写 composition 文件。
 
+### 2.6 `agentPresets` 的实例会在热重载时被替换
+
+修改 `agent-preset-registry` 的配置（设置页写 patch，或 Loader 热重载同一节点）会让该节点在同一个 Fiber 上重新 `apply`，并构造 **新的** `AgentPresets` 实例：
+
+- `definitions` / `generations` / `bindings` 全在实例上。旧实例的 `definitions` 会被各 preset 的 unregister disposer 清空，新实例则靠 `preset-*` 节点重新注册填充；
+- 已存在 Agent 的 scope parent 指向旧实例的 generation key，新实例的 `generations` 里没有这个 key，因此 `composedPreset(agent.ctx)` 对这些 Agent 返回 `undefined`（DSH 没有重新绑定的公开路径，只能重建 Agent）；
+- 在 Cordis 4 上，声明了 `inject` 的依赖方会随实例替换重新 `apply`；但这属于框架行为，且重载顺序不保证 `preset-*` 已注册完成，所以插件不能依赖它，也不能缓存实例引用。
+
+因此本插件的规则是：**只缓存 resolver，不缓存实例**；所有按 Preset id 建立的缓存（probe 目录、live 观测、default composition 是否已挂载）都以"当前实例身份"为失效条件；对拿不到实例的请求返回 503，页面重试；对拿不到 preset id 的 Agent 保留最后一次观测到的 id，避免静默放开已关闭的工具。
+
+**重载对在线会话是可修复的，但必须由插件代劳**：`dsh-scope` 的 `bindScopeParent()` 只允许绑定一次，重链必须走当初拿到的那份 `ScopeParentBinding.rebind()`；这份句柄存在旧实例的 `bindings` WeakMap 里，而新的注册表实例既没有它、也没有公开的"重新绑定"入口（`mount()`/`bind()` 会对已绑定的 key 直接抛错）。所以 DSH 自己没有恢复路径，`agents.resume` 还会因为会话已有 live Agent 而失败（Agent 注册在创建它的 fiber 上，`agents.list()` 在进程存活期间不会丢，GUI 也没有 close/dispose 入口）——这就是"只能重启"的表象。
+
+插件侧的做法（`src/preset-repair.ts`）是**复用旧句柄**：只要本插件没随注册表一起重载，旧实例对象就还活着，它的 `bindings` 里仍握着每个在线 Agent 的句柄。
+
+1. 每次解析服务时记录实例身份，替换发生时把旧实例留作 `retired`；
+2. 在 `agent/pre-step` 里，若 `composedPreset(agent.ctx)` 为 `undefined`（说明 scope 指向已退役的 generation），就按 `Reflect.ownKeys(agent.ctx)` 找 `Symbol("dsh.scope")` 那个自带属性（`createScope()` 写上去的 scope key，值就是 Agent 的 loop 对象），再用 `retired.bindings.get(key)` 命中绑定，从而拿到 `parent.rebind`；
+3. 用 `retain(id)` 租到新实例上同 id 的 generation，`parent.rebind(generation.key)` 把 Agent 的祖先链改指过去，并按 `join()` 的语义补上 `users++`、写入新实例的 `bindings`、释放旧 generation；
+4. `refreshAllBaselines()` 重新快照工具集，策略、按需组、catalog 一起恢复。
+
+全部按结构探测实现（`retain`/`collect`/`bindings`/`rebind` 缺一不可），失败时只告警一次并退回"策略兜底 + 用户横幅"，不会抛错。
+
+**三个必须跨越重启的坑**（1.2.16/1.2.17 修）：其一，本插件在 `inject` 里声明了 `agentPresets`，注册表被替换时 DSH 会连带重启本插件，内存态（旧实例引用、通知箱）必须放在 `globalThis`（`Symbol.for` 键）上才不会被丢；其二，`Context.extend()` 在有 use-site shadow 时返回的对象把 scope 标记放在**原型**上，探测 scope key 必须沿原型链走，否则一律 `no-key`；其三，**"挂回哪个 preset"不能只问 Session 投影**——投影属于被替换的实例、按需重建，重载后第一次 pre-step 里往往还是空的，必须回落到丢失的那个 binding（`binding.generation.mount.presetId`）。`GET /tool-manager/api/repair` 暴露 `live`/`retired`/`liveCapable`/`retiredCapable`/`refusals`/`attempts` 以及每个 Agent 的 `composed`/`declared`，用于在真实 Host 上定位重挂失败原因。
+
+仍无法修复的残余情况只有两种：**本插件与注册表同时被重载且旧实例从未被记录**（历史为空），或**新实例里已经没有被选 preset 的同名定义**——这两种才需要重启 DSH。
+
+插件的应对分三层：
+
+1. **策略不失效**：`composedPreset()` 拿不到时，用 `agentPresets.presetForSession(session)`（Session 日志里的 preset，跨实例有效）兜底，再退回内存里最后一次观测值。这样在线会话即使丢了工具，也不会把用户关掉的工具静默放回来。
+2. **诊断说清楚**：`CompositionWatch` 把"上一轮有 preset、这一轮没有"识别为注册表重载而不是模式切换，只告警一次，并且不再尝试注定失败的 re-calibration。
+3. **让用户知道**：`agent/pre-step` **不往会话里写任何东西**——工具丢失是用户要处理的事，模型既修不了也不该被提示去重试。用户侧走 `src/notices.ts` + `GET/POST /tool-manager/api/notices`，Web 端在 `shell.overlay`（全窗口浮层）渲染可关闭的横幅，不依赖用户打开工具管理设置页。注册表刚被替换时先给一条 transient 提示（"将在下次对话前自动重挂"），重挂成功由 `notices.settle()` 撤掉；只有失败才留下"需要重启 DSH"的正式提示。`UserNotice.kind`（`reloading`/`failed`）区分两级，同一会话+preset 去重。
+
+无法自动修复的部分属于 DSH 侧：`agent-preset-registry` 若能在配置热更新时复用实例/`definitions`，或提供"重新绑定 Agent"的公开路径，就不会有这一段。
+
 ## 3. 推荐架构
 
 ```text

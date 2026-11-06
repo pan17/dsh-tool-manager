@@ -33,12 +33,14 @@
 import type {
   AgentLike,
   AgentPresetsLike,
+  AgentPresetsSource,
   AgentSessionLike,
   ContextLike,
   PresetCompositionLike,
   ToolRuntimeLike,
   ToolSchemaLike,
 } from "./dsh.js";
+import { resolvePresets } from "./dsh.js";
 
 /** Session events that prove a Session is no longer blank. */
 const STARTED_EVENT_TYPES = new Set(["turn/start", "step/start", "user/message", "assistant/message"]);
@@ -57,7 +59,8 @@ interface Recalibration {
 }
 
 export interface CompositionWatchOptions {
-  presets: AgentPresetsLike;
+  /** The live registry, or a resolver: DSH replaces the instance on reload. */
+  presets: AgentPresetsSource;
   /** Live Agents, in any order. */
   agents: () => readonly AgentLike[];
   tools: () => ToolRuntimeLike | undefined;
@@ -71,6 +74,12 @@ export interface CompositionWatchOptions {
    * name (a disabled tool, an on-demand group member, the plugin's own tools).
    */
   explainedLoss?: (presetId: string | undefined, name: string) => boolean;
+  /**
+   * An Agent's preset binding disappeared without a mode switch: the registry
+   * instance that composed it was replaced. The policy runtime tries to
+   * re-attach it; this hook lets the reader hear about it early.
+   */
+  onReloaded?: (agent: AgentLike, presetId: string) => void;
   warn: (message: string) => void;
   /** Informational sink; falls back to `warn` when the Host has no info level. */
   info?: (message: string) => void;
@@ -96,6 +105,17 @@ export class CompositionWatch {
   private disposed = false;
 
   constructor(private readonly options: CompositionWatchOptions) {}
+
+  /**
+   * Read the live registry.
+   *
+   * Observations are deliberately kept across a registry replacement: an Agent
+   * whose preset binding the retired instance took with it must read as a loss,
+   * not as first contact, or the one report that explains it never happens.
+   */
+  private presets(): AgentPresetsLike | undefined {
+    return resolvePresets(this.options.presets);
+  }
 
   /** Subscribe to the events that can change an Agent's tool set. */
   start(context: ContextLike): void {
@@ -172,13 +192,15 @@ export class CompositionWatch {
   private async inspect(): Promise<void> {
     const tools = this.options.tools();
     if (tools === undefined) return;
+    const presets = this.presets();
+    if (presets === undefined) return;
     for (const agent of this.options.agents()) {
       const agentId = agent.id;
       if (agentId === undefined || agentId === this.options.excludeAgentId) continue;
       if (this.busy.has(agentId)) continue;
       const names = toolNames(tools, agent);
       if (names === undefined) continue;
-      const preset = this.options.presets.composedPreset(agent.ctx);
+      const preset = presets.composedPreset(agent.ctx);
       const previous = this.observations.get(agentId);
       this.observations.set(agentId, { preset, names });
       if (previous === undefined) continue;
@@ -187,6 +209,10 @@ export class CompositionWatch {
         // joining composition won its registration race is not knowable from
         // here. Re-calibrate rather than guess.
         if (preset !== undefined) this.pending.set(agentId, { agent, target: preset });
+        // A binding that vanished without a switch means the registry instance
+        // was replaced. The policy runtime re-attaches it; if that cannot work,
+        // this is the earliest moment the reader can be told.
+        else if (previous.preset !== undefined) this.options.onReloaded?.(agent, previous.preset);
         continue;
       }
       const lost = previous.names.filter((name) => !names.includes(name));
@@ -260,13 +286,19 @@ export class CompositionWatch {
     const { agent, target } = job;
     const agentId = agent.id ?? "<unknown>";
     const tools = this.options.tools();
+    const presets = this.presets();
+    if (presets === undefined) return;
+    // A re-calibration composes through another preset and back; with the
+    // binding gone it would throw on the first leg. The policy runtime owns
+    // re-attaching a reloaded registry (and explaining when it cannot).
+    if (presets.composedPreset(agent.ctx) === undefined) return;
     if (!isBlankSession(agent.session)) {
       // DSH keeps the preset of a started Session fixed, so the only honest
       // move left is to name what is missing and how to get it back.
       await this.reportShortfall(agent, target);
       return;
     }
-    const transit = await this.chooseTransit(target);
+    const transit = await this.chooseTransit(presets, target);
     if (transit === undefined) {
       this.options.warn(
         `tool-manager: Session ${agentId} switched to preset ${JSON.stringify(target)} but no other usable preset exists to re-calibrate it through.`,
@@ -275,9 +307,9 @@ export class CompositionWatch {
     }
     const before = toolNames(tools, agent) ?? [];
     try {
-      await this.options.presets.recompose(agent.ctx, transit);
+      await presets.recompose(agent.ctx, transit);
       await this.settle();
-      const composed = this.options.presets.composedPreset(agent.ctx);
+      const composed = presets.composedPreset(agent.ctx);
       if (composed !== transit) {
         // A different switch landed while this Session was transiting: that
         // switch owns the Session now, so never force the preset this
@@ -288,18 +320,18 @@ export class CompositionWatch {
         }
         return;
       }
-      await this.options.presets.recompose(agent.ctx, target);
+      await presets.recompose(agent.ctx, target);
       await this.settle();
     } catch (error) {
-      await this.restore(agent, target);
+      await this.restore(presets, agent, target);
       this.options.warn(
         `tool-manager: Session ${agentId} could not be re-calibrated through preset ${JSON.stringify(transit)}: ${errorMessage(error)}`,
       );
       return;
     }
-    if (this.options.presets.composedPreset(agent.ctx) !== target) {
-      await this.restore(agent, target);
-      if (this.options.presets.composedPreset(agent.ctx) !== target) {
+    if (presets.composedPreset(agent.ctx) !== target) {
+      await this.restore(presets, agent, target);
+      if (presets.composedPreset(agent.ctx) !== target) {
         this.options.warn(
           `tool-manager: Session ${agentId} is left on preset ${JSON.stringify(transit)} because the switch back to ${JSON.stringify(target)} did not commit; pick its mode again in the mode picker.`,
         );
@@ -318,10 +350,13 @@ export class CompositionWatch {
   }
 
   /** The transit Preset: the one whose composition shares least with nothing. */
-  private async chooseTransit(target: string): Promise<string | undefined> {
+  private async chooseTransit(
+    presets: AgentPresetsLike,
+    target: string,
+  ): Promise<string | undefined> {
     let inventory: readonly PresetCompositionLike[];
     try {
-      inventory = await this.options.presets.compositionInventory();
+      inventory = await presets.compositionInventory();
     } catch {
       return undefined;
     }
@@ -335,8 +370,12 @@ export class CompositionWatch {
   }
 
   /** Put one Agent back on its intended Preset after a failed leg. */
-  private async restore(agent: AgentLike, target: string): Promise<void> {
-    await this.options.presets.recompose(agent.ctx, target).catch(() => undefined);
+  private async restore(
+    presets: AgentPresetsLike,
+    agent: AgentLike,
+    target: string,
+  ): Promise<void> {
+    await presets.recompose(agent.ctx, target).catch(() => undefined);
     await this.settle();
   }
 
@@ -404,3 +443,4 @@ function nextEventLoopTurn(): Promise<void> {
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+

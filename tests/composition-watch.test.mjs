@@ -379,27 +379,29 @@ describe("plugin wiring", () => {
     const agent = fakeAgent({ preset: "standard", names: ["read"] });
     const calls = [];
     const listeners = new Map();
+    // One instance for the life of the load: DSH stores the service, so only a
+    // reload replaces it, and the plugin treats a replaced instance as a new
+    // registry whose bindings are not its own.
+    const presets = {
+      composedPreset: (ctx) => ctx.preset,
+      async compositionInventory() {
+        return INVENTORY;
+      },
+      async acquireScope(id) {
+        return {
+          key: id ?? "<default>",
+          async [Symbol.asyncDispose]() {},
+        };
+      },
+      async mount() {},
+      async recompose(ctx, id) {
+        calls.push(id);
+        ctx.preset = id;
+      },
+    };
     apply({
       get(name) {
-        if (name === "agentPresets") {
-          return {
-            composedPreset: (ctx) => ctx.preset,
-            async compositionInventory() {
-              return INVENTORY;
-            },
-            async acquireScope(id) {
-              return {
-                key: id ?? "<default>",
-                async [Symbol.asyncDispose]() {},
-              };
-            },
-            async mount() {},
-            async recompose(ctx, id) {
-              calls.push(id);
-              ctx.preset = id;
-            },
-          };
-        }
+        if (name === "agentPresets") return presets;
         if (name === "tools") {
           return {
             schemas: (scope) => (Array.isArray(scope?.names) ? scope.names.map(schema) : []),
