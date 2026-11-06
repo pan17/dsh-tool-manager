@@ -50,6 +50,8 @@ mcp__<serverName>__<rawToolName>
 
 `resolve()` 不在 scope 链上做「own 层豁免」，因此它是隐藏 Agent 自身作用域注册的唯一受支持落点。插件包装 `ToolsService.prototype.resolve`：等 Host 解析完成后，按当前 Agent 的策略把隐藏名从 `view()` 投影中剔除；`dispose()` 原样转发。包装只替换 `view`，失败一律返回 Host 原对象，卸载时还原；旧版 DSH 没有 `resolve()`，自动跳过并沿用提示词过滤。这样 `subagent`、`schedule_*` 等 scope-local 工具与全局工具表现一致。
 
+包装在调用 Host `resolve()` **之前**先用 `schemas(agent)` 核对一次 baseline（见 4.3）：热装插件、组合重载或 standing Preset 重新挂载都可能把注册落在 `install()` 与 `tools/change` 之间，过期快照会让按需组解析为空，组内工具反而照常出现在这一步的集合里。核对只在 live 面出现快照没有的名字时重算并 `reconcile()`，因此新工具在当步就归组并被剔除，`agent/pre-step` 的目录也在同一步更新；工具面收缩可能是组合切换的空窗，不在这里采用。
+
 ### 2.3 每个模型 step 都重新组装工具目录
 
 Agent loop 在 `preStep()` 中**先** `systemPrompt.assemble()`，**再**跑 `agent/pre-step` waterfall。因此：
@@ -193,6 +195,7 @@ interface ToolManagerSettings {
 - 没有按需组的 Preset 用 `restrict({ deny: ['tool_list'] })` 隐藏它，避免无关会话看到空的 discovery 工具；
 - 只对 baseline 中真实存在的名字构造 deny；
 - 监听 `tools/change`：先暂时卸下 restriction 再重读 baseline，避免把已隐藏的工具当成“已消失”；刷新期间抑制重入，防止自己的 restrict/register 再次触发刷新；
+- 每一步 `tools.resolve()` 之前、`agent/pre-step` 里以及 `tool_list` 打开组时，再用 live `schemas(agent)` 核对一次 baseline（一次 map 遍历）：快照只靠事件刷新会漏掉落在 `install()` 与 `tools/change` 之间的注册，过期快照会让按需组解析为 0 个工具、从目录消失，组内工具却一直可见，直到重启重建快照；只在出现新名字时采用，收缩交给 `tools/change` 的防抖刷新；
 - 若仍撞上 unknown-name 错误，从诊断文本解析 `known global tools` 后重试交集；
 - scope-local 名无法用 `restrict()` 隐藏：0.2.2 之前由提示词过滤兜底，0.2.2 起改由 `tools.resolve()` 的 per-step 过滤兜底（见 2.2.1）；两者都失效时保留 guard 拦截并告警一次。
 

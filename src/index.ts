@@ -48,7 +48,7 @@ interface WebServer {
     kind: "exact" | "prefix";
     path: string;
     handler(req: HttpRequest, res: HttpResponse): void;
-  }): unknown;
+  }): () => void;
 }
 
 interface AgentHandleLike {
@@ -445,6 +445,27 @@ export function apply(ctx: unknown): void {
     const webServer = webCtx.get<WebServer>("webServer");
     if (!webServer) return;
 
+    /**
+     * Every route this instance owns.
+     *
+     * `register()` refuses a duplicate path and hands back the disposer that
+     * lifts this one. Dropping them leaves a retired instance's handlers in the
+     * host's route table: the reloaded plugin then cannot register its own and
+     * the page keeps talking to a runtime nobody drives any more. Cordis only
+     * collects what the inject callback returns, so hand the disposers back.
+     */
+    const routes: Array<() => void> = [];
+    const route = (options: Parameters<WebServer["register"]>[0]): void => {
+      try {
+        routes.push(webServer.register(options));
+      } catch (error) {
+        // A refused route must not leave the earlier ones half-registered: the
+        // callback is about to fail, and nothing would ever dispose them.
+        for (const dispose of routes.splice(0)) dispose();
+        throw error;
+      }
+    };
+
     /** Build a snapshot from whatever services are live at this moment. */
     const buildCurrentSnapshot = (): Promise<ToolManagerSnapshot> => {
       const live = services();
@@ -460,7 +481,7 @@ export function apply(ctx: unknown): void {
      */
     let rosterSettled: AgentPresetsLike | undefined;
 
-    webServer.register({
+    route({
       kind: "exact",
       path: "/tool-manager/api/snapshot",
       handler: (req, res) => {
@@ -497,7 +518,7 @@ export function apply(ctx: unknown): void {
       },
     });
 
-    webServer.register({
+    route({
       kind: "exact",
       path: "/tool-manager/api/suggest-group",
       handler: (req, res) => {
@@ -537,7 +558,7 @@ export function apply(ctx: unknown): void {
       },
     });
 
-    webServer.register({
+    route({
       kind: "exact",
       path: "/tool-manager/api/auto-group",
       handler: (req, res) => {
@@ -577,7 +598,7 @@ export function apply(ctx: unknown): void {
       },
     });
 
-    webServer.register({
+    route({
       kind: "exact",
       path: "/tool-manager/api/repair",
       handler: (_req, res) => {
@@ -585,7 +606,7 @@ export function apply(ctx: unknown): void {
       },
     });
 
-    webServer.register({
+    route({
       kind: "exact",
       path: "/tool-manager/api/notices",
       handler: (req, res) => {
@@ -609,7 +630,7 @@ export function apply(ctx: unknown): void {
       },
     });
 
-    webServer.register({
+    route({
       kind: "exact",
       path: "/tool-manager/api/save",
       handler: (req, res) => {
@@ -650,6 +671,16 @@ export function apply(ctx: unknown): void {
         );
       },
     });
+
+    return () => {
+      for (const dispose of routes.splice(0)) {
+        try {
+          dispose();
+        } catch {
+          // A host that already dropped the table must not block the unload.
+        }
+      }
+    };
   });
 
   context.effect?.(() => async () => {

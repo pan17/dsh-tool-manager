@@ -344,9 +344,74 @@ export class ToolPolicyRuntime {
     for (const state of this.states.values()) this.reconcile(state);
   }
 
+  /**
+   * Adopt names the live inherited surface gained since the snapshot.
+   *
+   * The baseline is a snapshot, and a snapshot can miss a registration that
+   * lands outside a `tools/change` edge: a plugin installed while the runtime
+   * was still starting, a standing Preset re-mounting, or a composition reload
+   * that re-registers tools without emitting a change. A stale baseline makes a
+   * saved on-demand group resolve to zero tools, so the group silently drops
+   * out of the catalog and its tools stay visible — the "the group only works
+   * after restarting DSH" report. One live `schemas(agent)` read per step is a
+   * map walk and keeps the policy, the catalog and the step on one tool set.
+   *
+   * The visible surface is read first: this Agent's own restriction only ever
+   * removes names, so a name it shows that the snapshot lacks is proof of a new
+   * registration. Only then is the restriction lifted for a full read — adopting
+   * the restricted view would drop every grouped tool from the snapshot and
+   * `reconcile()` would then un-hide them. A surface that merely shrank can be
+   * the transient gap of a composition swap, which the debounced `tools/change`
+   * refresh in `refreshAllBaselines()` settles.
+   * @param state - the Agent whose baseline may have drifted.
+   * @returns whether the baseline changed.
+   */
+  private syncBaseline(state: AgentState): boolean {
+    const scopedTools = state.agent.ctx.get<ToolRuntimeLike>("tools");
+    // A missing service is a reload window, not an empty tool set.
+    if (!scopedTools) return false;
+    let nextSchemas: ToolSchemaLike[];
+    try {
+      const known = new Set(state.baseline);
+      if (scopedTools.schemas(state.agent).every((schema) => known.has(schema.name))) return false;
+      this.mutating = true;
+      try {
+        state.restriction?.();
+        state.restriction = undefined;
+        nextSchemas = scopedTools.schemas(state.agent);
+      } finally {
+        this.mutating = false;
+      }
+    } catch {
+      // A refresh must never break the step; the guard still enforces the policy.
+      return false;
+    }
+    state.baseline = nextSchemas.map((schema) => schema.name);
+    state.baselineSchemas = nextSchemas;
+    this.observe(state);
+    this.reconcile(state);
+    return true;
+  }
+
+  /** Refresh the baseline of the Agent a `tools.resolve()` call belongs to. */
+  private syncStepBaseline(context: unknown): void {
+    try {
+      const agent = asCreated(context)?.agent;
+      if (!agent) return;
+      const state = this.states.get(agent);
+      if (!state) return;
+      this.syncBaseline(state);
+    } catch {
+      // A refresh must never break the step; the guard still enforces the policy.
+    }
+  }
+
   private openGroup(agent: AgentLike, requestedGroup: string | undefined): ToolListResult {
     const state = this.states.get(agent);
     if (!state) throw new Error("tool manager is not attached to this Agent");
+    // `tool_list` is the last chance to see a group whose tools appeared after
+    // this Agent's snapshot; resolve it against the live surface, not the old one.
+    this.syncBaseline(state);
     const groups = resolveActiveGroups(this.policy(agent), state.baseline);
     const known = groups.map((item) => item.name).join(", ") || "(none)";
     if (requestedGroup === undefined || requestedGroup.trim() === "") {
@@ -380,6 +445,10 @@ export class ToolPolicyRuntime {
     // to act on, and the reader is reached through the notice banner instead of
     // through the transcript.
     this.reportLostBinding(state);
+    // Refresh before the catalog decision: a tool registered after this Agent's
+    // snapshot would otherwise leave its on-demand group empty here, and the
+    // model would never learn the group exists.
+    this.syncBaseline(state);
     const groups = resolveActiveGroups(this.policy(agent), state.baseline);
     return applyCatalogDecision(
       decision,
@@ -588,6 +657,10 @@ export class ToolPolicyRuntime {
     }
     const runtime = this;
     const patched = (async function (this: unknown, ...args: unknown[]): Promise<unknown> {
+      // Before the host resolves the set: a tool registered after this Agent's
+      // snapshot must join its on-demand group now, or the group stays empty and
+      // the tool stays admitted for this step.
+      runtime.syncStepBaseline(args[0]);
       const set = await (current as (...inputs: unknown[]) => Promise<unknown>).apply(this, args);
       return runtime.filterStepToolSet(args[0], set);
     }) as PatchedMethod;

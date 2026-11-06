@@ -5,6 +5,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- 修复「安装新插件后，把它的工具加入按需组，新旧会话都不生效，必须重启 DSH」的问题。按需组是否有效取决于该 Agent 的 baseline（继承工具名快照），而 baseline 只在 `install()`（`agent/created`）与 `tools/change` 时刷新；插件热装/组合重载可能把工具注册落在两者之间，于是组解析为 0 个工具、从目录里消失，组内工具反而一直可见，直到重启重建快照。现在每一步都在 `tools.resolve()` 之前、`agent/pre-step` 里以及 `tool_list` 打开组时用 live `schemas(agent)` 核对 baseline（一次 map 遍历）：只要 live 面出现快照没有的名字，就立即采用并 `reconcile()`，新工具在当步就归入按需组并从该步的工具集合中剔除，目录同一步更新，不需要重启。只对「新增」生效——工具面收缩可能是组合切换的空窗，仍交给 `tools/change` 的防抖刷新，避免为一步把组内工具放出来。
+- 修复本插件的 HTTP 路由在插件重载后残留的问题：`context.inject(["webServer"], ...)` 的回调没有保留也没有返回 `webServer.register()` 的 disposer，重载后新实例注册同一路径会抛 `webserver: duplicate exact route`，而旧实例的 handler 仍在服务——设置页会继续读写一个已经没人驱动的 runtime。现在所有路由的 disposer 都被收集，并在注入作用域卸载时统一释放；若中途某条路由被拒绝，已注册的部分也会立刻回滚。
+
 ## [1.2.11] - 2026-11-05
 
 ### Fixed

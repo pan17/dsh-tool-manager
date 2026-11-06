@@ -597,3 +597,166 @@ describe("ToolPolicyRuntime registry reload", () => {
     await runtime.dispose();
   });
 });
+
+describe("a tool registered after the baseline snapshot", () => {
+  function host() {
+    const schema = (name) => ({ name, description: name, parameters: {} });
+    let names = ["read"];
+    let restricted = new Set();
+    let guard;
+    let stepSet;
+    const listeners = new Map();
+    /** The Agent-scoped service: `restrict()` removes names from what it shows. */
+    const visible = () => names.filter((name) => !restricted.has(name)).map(schema);
+    const scopedTools = {
+      schemas: visible,
+      register: () => () => {},
+      restrict({ deny }) {
+        restricted = new Set(deny);
+        return () => {
+          restricted = new Set();
+        };
+      },
+      guard(callback) {
+        guard = callback;
+        return () => {};
+      },
+    };
+    const agent = {
+      id: "session-1",
+      ctx: {
+        get: (name) => (name === "tools" ? scopedTools : undefined),
+        on: () => () => {},
+      },
+      session: { seq: 0, eventAt: () => undefined, surface: { nodes: [] } },
+    };
+    const hostTools = {
+      schemas: visible,
+      register: () => () => {},
+      restrict: () => () => {},
+      // The real host service owns `resolve`; the plugin patches it in place.
+      async resolve() {
+        stepSet = {
+          dispose() {},
+          view: () => new Map(visible().map((item) => [item.name, item])),
+        };
+        return stepSet;
+      },
+    };
+    const context = {
+      get(name) {
+        if (name === "tools") return hostTools;
+        if (name === "agents") return { list: () => [agent] };
+        return undefined;
+      },
+      on(event, listener) {
+        listeners.set(event, [...(listeners.get(event) ?? []), listener]);
+        return () => {};
+      },
+    };
+    const settings = {
+      presets: {
+        standard: {
+          disabled: [],
+          groups: [{ name: "GitHub", description: "github", patterns: ["github_*"] }],
+        },
+      },
+    };
+    return {
+      agent,
+      context,
+      hostTools,
+      listeners,
+      settings,
+      get guard() {
+        return guard;
+      },
+      get stepSet() {
+        return stepSet;
+      },
+      get restricted() {
+        return [...restricted];
+      },
+      visibleNames() {
+        return visible().map((item) => item.name);
+      },
+      addLateTool() {
+        names = ["read", "github_search"];
+      },
+      setTools(next) {
+        names = [...next];
+      },
+    };
+  }
+
+  const presets = { composedPreset: () => "standard" };
+
+  it("joins its on-demand group on the next step without a restart", async () => {
+    const h = host();
+    const runtime = new ToolPolicyRuntime(h.context, presets, h.settings);
+    runtime.start();
+    const preStep = h.listeners.get("agent/pre-step")[0];
+
+    // A plugin installed after this Agent's snapshot registered its tool into
+    // the live surface, but no `tools/change` edge reached the runtime.
+    h.addLateTool();
+
+    const decision = await preStep({ agent: h.agent }, () => ({ kind: "enter", messages: [] }));
+
+    assert.equal(decision.messages.length, 1, "the catalog now names the group");
+    assert.equal(decision.messages[0].source.kind, "tool-manager-catalog");
+    assert.deepEqual(decision.messages[0].source.entries.map((entry) => entry.name), ["GitHub"]);
+    assert.deepEqual(decision.messages[0].source.entries[0].tools, ["github_search"]);
+    assert.match(h.guard({ name: "github_search" }), /belongs to on-demand group "GitHub"/);
+    await runtime.dispose();
+  });
+
+  it("hides the late tool from the step set the host is about to resolve", async () => {
+    const h = host();
+    const runtime = new ToolPolicyRuntime(h.context, presets, h.settings);
+    runtime.start();
+
+    h.addLateTool();
+    const set = await h.hostTools.resolve({ agent: h.agent });
+
+    assert.deepEqual([...set.view().keys()], ["read"]);
+    await runtime.dispose();
+  });
+
+  it("keeps the snapshot when the surface merely shrinks", async () => {
+    const h = host();
+    h.addLateTool();
+    const runtime = new ToolPolicyRuntime(h.context, presets, h.settings);
+    runtime.start();
+    const preStep = h.listeners.get("agent/pre-step")[0];
+
+    // A composition swap can drop a standing layer for one turn; adopting that
+    // gap would un-hide the group's tools, so only growth refreshes the snapshot.
+    h.setTools(["read"]);
+    const decision = await preStep({ agent: h.agent }, () => ({ kind: "enter", messages: [] }));
+
+    assert.deepEqual(decision.messages[0].source.entries.map((entry) => entry.name), ["GitHub"]);
+    assert.deepEqual(decision.messages[0].source.entries[0].tools, ["github_search"]);
+    await runtime.dispose();
+  });
+
+  it("keeps grouped tools in the snapshot while their group is closed", async () => {
+    const h = host();
+    h.setTools(["read", "github_search"]);
+    const runtime = new ToolPolicyRuntime(h.context, presets, h.settings);
+    runtime.start();
+    const preStep = h.listeners.get("agent/pre-step")[0];
+    assert.deepEqual(h.restricted, ["github_search"], "the closed group is denied");
+
+    // A second plugin registers another tool while the group is still closed.
+    // The visible surface hides `github_search`, so a naive re-read would drop
+    // it from the snapshot and lift the group's restriction.
+    h.setTools(["read", "github_search", "gitlab_search"]);
+    const decision = await preStep({ agent: h.agent }, () => ({ kind: "enter", messages: [] }));
+
+    assert.deepEqual(h.restricted, ["github_search"], "the closed group stays denied");
+    assert.deepEqual(h.visibleNames(), ["read", "gitlab_search"]);
+    assert.deepEqual(decision.messages[0].source.entries[0].tools, ["github_search"]);
+    await runtime.dispose();
+  });
+});
