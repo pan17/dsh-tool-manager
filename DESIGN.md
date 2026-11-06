@@ -52,6 +52,22 @@ mcp__<serverName>__<rawToolName>
 
 包装在调用 Host `resolve()` **之前**先用 `schemas(agent)` 核对一次 baseline（见 4.3）：热装插件、组合重载或 standing Preset 重新挂载都可能把注册落在 `install()` 与 `tools/change` 之间，过期快照会让按需组解析为空，组内工具反而照常出现在这一步的集合里。核对只在 live 面出现快照没有的名字时重算并 `reconcile()`，因此新工具在当步就归组并被剔除，`agent/pre-step` 的目录也在同一步更新；工具面收缩可能是组合切换的空窗，不在这里采用。
 
+### 2.2.2 提示词段落随工具族一起隐藏
+
+提示词里不只有工具声明：`@deepseek-ai/dsh-mcp-resources` 会注册 `mcp-resource-servers` 段（列出资源服务器名，并让模型用三个共享资源工具），`@deepseek-ai/dsh-mcp-client` 会为每个服务器注册 `mcp:<server>` 段（服务器自带 instructions）。这些段落只在对应工具可用时才有意义；工具全部收进未打开的按需组或被关闭后，段落会诱导模型调用已经不存在的工具。
+
+DSH 的 section 注册只有 `name` / `order` / `text` / `interpolate`，没有“本段介绍哪些工具”的元数据，因此按命名约定归属（`src/runtime.ts` 的 `sectionToolOwners()`）：
+
+- `tool:<name>`：DSH 为单个工具生成的说明段；
+- `mcp:<server>`：该服务器注册的全部 `mcp__<server>__*` 工具；
+- `mcp-resource-servers`：`list_mcp_resources` / `list_mcp_resource_templates` / `read_mcp_resource` 三个共享工具。
+
+只有「该族全部工具都被隐藏」时才删除段落；族内还有任一工具可见就保留（例如只关闭一个 MCP 工具时，服务器说明仍然有效）。不属于任何工具族的段落、以及族内没有注册任何工具的段落一律保留，避免误删 persona、计划策略这类正文。
+
+归属与判据都不依赖 baseline 是否包含该工具（issue #3）：`denyNames()` 只能拒绝**已存在**的名字，因为 `restrict()` 会拒绝未知工具；而子代理在 tool-manager install 之前就被 `childCtx.tools.restrict(toolFilter)` 裁过一次工具面，baseline 里可能一个成员都没有。因此段落判定额外读 **Preset 策略本身**——`disabled` 命中，或命中某个**未 open** 的组 patterns，就视为折叠，即使该工具不在 baseline。这样「折叠工具 = 折叠其说明段」按声明生效，与委派层裁了多少工具无关。
+
+族的成员从两处取并集：baseline 里实际继承到的名字 + 策略里写明的字面名（`disabled` 与不含 `*` 的 patterns）。若族在 baseline 与策略里都没有具体成员（只被通配符覆盖，例如 `mcp__playwright__*`），则只有当某个未 open 的组的 pattern 以 `mcp__<server>__` 开头时才删除该服务器的 instructions 段。
+
 ### 2.3 每个模型 step 都重新组装工具目录
 
 Agent loop 在 `preStep()` 中**先** `systemPrompt.assemble()`，**再**跑 `agent/pre-step` waterfall。因此：

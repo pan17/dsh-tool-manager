@@ -200,6 +200,243 @@ describe("ToolPolicyRuntime restart recovery", () => {
     await runtime.dispose();
   });
 
+  it("drops prompt sections that only introduce a fully hidden tool family", async () => {
+    const schemas = [
+      "tool_list",
+      "read",
+      "list_mcp_resources",
+      "list_mcp_resource_templates",
+      "read_mcp_resource",
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_close",
+    ].map((name) => ({ name, description: name, parameters: {} }));
+    let assemble;
+    let discovery;
+    const scopedTools = {
+      schemas() { return schemas; },
+      register() { throw new Error("scope register should not be used"); },
+      restrict() { return () => {}; },
+      guard() { return () => {}; },
+    };
+    const agent = {
+      ctx: {
+        get(name) { return name === "tools" ? scopedTools : undefined; },
+        on(name, handler) { if (name === "system-prompt/assemble") assemble = handler; return () => {}; },
+      },
+      session: resumedSession(),
+    };
+    const context = {
+      get(name) {
+        if (name === "tools") return {
+          schemas() { return schemas; },
+          register(definition) { discovery = definition; return () => {}; },
+        };
+        if (name === "agents") return { list: () => [agent] };
+        return undefined;
+      },
+      on() {},
+    };
+    const runtime = new ToolPolicyRuntime(context, { composedPreset: () => "standard" }, {
+      presets: {
+        standard: {
+          disabled: [],
+          groups: [
+            {
+              name: "MCP资源浏览",
+              patterns: ["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"],
+            },
+            {
+              name: "浏览器自动化",
+              patterns: ["mcp__playwright__browser_navigate", "mcp__playwright__browser_close"],
+            },
+          ],
+        },
+      },
+    });
+    runtime.start();
+
+    const presentation = () => ({
+      sections: [
+        { name: "tool:read" },
+        { name: "tool:list_mcp_resources" },
+        { name: "mcp-resource-servers" },
+        { name: "mcp:playwright" },
+        { name: "mcp:nonexistent" },
+        { name: "identity" },
+      ],
+      contexts: [],
+      variables: {},
+    });
+    const kept = async () => (await assemble({}, {}, async () => presentation()))
+      .sections.map((section) => section.name);
+
+    // Both groups are closed, so every advertised tool is hidden and the
+    // sections that exist only for them go too. A section whose family
+    // registered no tools stays: nothing is hidden, nothing is stale.
+    assert.deepEqual(await kept(), ["tool:read", "mcp:nonexistent", "identity"]);
+
+    // One visible tool is enough to keep its family's section.
+    await discovery.execute({ group: "MCP资源浏览" }, { agent });
+    assert.deepEqual(await kept(), [
+      "tool:read",
+      "tool:list_mcp_resources",
+      "mcp-resource-servers",
+      "mcp:nonexistent",
+      "identity",
+    ]);
+
+    // Same for an MCP server's own instruction section: opening its group
+    // restores it, closing it removes it again.
+    await discovery.execute({ group: "浏览器自动化" }, { agent });
+    assert.deepEqual(await kept(), [
+      "tool:read",
+      "tool:list_mcp_resources",
+      "mcp-resource-servers",
+      "mcp:playwright",
+      "mcp:nonexistent",
+      "identity",
+    ]);
+
+    // A partially hidden family keeps its section while a sibling is callable.
+    runtime.update({
+      presets: {
+        standard: {
+          disabled: [
+            "mcp__playwright__browser_navigate",
+            "list_mcp_resources",
+            "list_mcp_resource_templates",
+            "read_mcp_resource",
+          ],
+          groups: [],
+        },
+      },
+    });
+    assert.deepEqual(await kept(), ["tool:read", "mcp:playwright", "mcp:nonexistent", "identity"]);
+
+    // Hiding the last member removes the server instructions with it.
+    runtime.update({
+      presets: {
+        standard: {
+          disabled: [
+            "mcp__playwright__browser_navigate",
+            "mcp__playwright__browser_close",
+            "list_mcp_resources",
+            "list_mcp_resource_templates",
+            "read_mcp_resource",
+          ],
+          groups: [],
+        },
+      },
+    });
+    assert.deepEqual(await kept(), ["tool:read", "mcp:nonexistent", "identity"]);
+    await runtime.dispose();
+  });
+
+  it("folds sections by preset policy when an upstream restrict already shrank the baseline", async () => {
+    // Issue #3: a delegated child Agent joins the parent's preset, but its tool
+    // surface was narrowed by `childCtx.tools.restrict(toolFilter)` before this
+    // plugin installed. The folded tools are therefore absent from the
+    // baseline, `denyNames()` returns nothing, and only the policy itself still
+    // proves the section is stale.
+    const schemas = ["tool_list", "read"].map((name) => ({ name, description: name, parameters: {} }));
+    let assemble;
+    const warnings = [];
+    const scopedTools = {
+      schemas() { return schemas; },
+      register() { throw new Error("scope register should not be used"); },
+      restrict() { return () => {}; },
+      guard() { return () => {}; },
+    };
+    const agent = {
+      ctx: {
+        get(name) { return name === "tools" ? scopedTools : undefined; },
+        on(name, handler) { if (name === "system-prompt/assemble") assemble = handler; return () => {}; },
+      },
+      session: resumedSession(),
+    };
+    const context = {
+      get(name) {
+        if (name === "tools") return { schemas() { return schemas; }, register() { return () => {}; } };
+        if (name === "agents") return { list: () => [agent] };
+        if (name === "logger") return { warn: (message) => warnings.push(message) };
+        return undefined;
+      },
+      on() {},
+    };
+    const runtime = new ToolPolicyRuntime(context, { composedPreset: () => "standard" }, {
+      presets: {
+        standard: {
+          disabled: ["orphan_tool"],
+          groups: [
+            { name: "bilibili", patterns: ["bilibili_extract", "bilibili_login", "bilibili_doctor"] },
+            { name: "MCP资源浏览", patterns: ["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"] },
+            { name: "浏览器自动化", patterns: ["mcp__playwright__*"] },
+          ],
+        },
+      },
+    });
+    runtime.start();
+
+    const kept = async () => (await assemble({}, {}, async () => ({
+      sections: [
+        { name: "tool:read" },
+        { name: "tool:bilibili_extract" },
+        { name: "tool:orphan_tool" },
+        { name: "mcp-resource-servers" },
+        { name: "mcp:playwright" },
+        { name: "identity" },
+      ],
+      contexts: [],
+      variables: {},
+    }))).sections.map((section) => section.name);
+
+    // Nothing here is in the baseline, yet every folded or disabled family is
+    // gone: the section follows the preset declaration, not this Agent's
+    // inherited surface. `tool:read` and the unowned `identity` stay.
+    assert.deepEqual(await kept(), ["tool:read", "identity"]);
+    // Folding is silent: the fallback warning is about declarations, not here.
+    assert.deepEqual(warnings.filter((message) => /Agent-scoped tool/.test(message)), []);
+    await runtime.dispose();
+  });
+
+  it("keeps every section when the preset has no policy at all", async () => {
+    const schemas = ["read"].map((name) => ({ name, description: name, parameters: {} }));
+    let assemble;
+    const scopedTools = {
+      schemas() { return schemas; },
+      register() { throw new Error("scope register should not be used"); },
+      restrict() { return () => {}; },
+      guard() { return () => {}; },
+    };
+    const agent = {
+      ctx: {
+        get(name) { return name === "tools" ? scopedTools : undefined; },
+        on(name, handler) { if (name === "system-prompt/assemble") assemble = handler; return () => {}; },
+      },
+      session: resumedSession(),
+    };
+    const context = {
+      get(name) {
+        if (name === "tools") return { schemas() { return schemas; }, register() { return () => {}; } };
+        if (name === "agents") return { list: () => [agent] };
+        return undefined;
+      },
+      on() {},
+    };
+    const runtime = new ToolPolicyRuntime(context, { composedPreset: () => "minimal" }, { presets: {} });
+    runtime.start();
+
+    const sections = [
+      { name: "tool:read" },
+      { name: "tool:bilibili_extract" },
+      { name: "mcp-resource-servers" },
+      { name: "identity" },
+    ];
+    const filtered = await assemble({}, {}, async () => ({ sections, contexts: [], variables: {} }));
+    assert.deepEqual(filtered.sections.map((section) => section.name), sections.map((section) => section.name));
+    await runtime.dispose();
+  });
+
   it("hides Agent-scoped tools from the per-step tool set (0.2.2)", async () => {
     const globals = ["read"];
     const own = ["subagent"];

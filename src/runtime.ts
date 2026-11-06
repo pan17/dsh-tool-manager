@@ -19,6 +19,7 @@ import type { UserNoticeInput } from "./notices.js";
 import {
   denyNames,
   findGroup,
+  matchesAnyPattern,
   parseKnownRestrictable,
   policyFor,
   resolveActiveGroups,
@@ -26,6 +27,7 @@ import {
 } from "./policy.js";
 import {
   DISCOVERY_TOOL_NAME,
+  PTC_TRANSPORT_NAME,
   TOOL_MANAGER_PROBE_SESSION_ID,
   type PresetToolPolicy,
   type ToolListResult,
@@ -287,8 +289,10 @@ export class ToolPolicyRuntime {
       if (typeof next !== "function") return args[0];
       const assembly = await (next as () => Promise<unknown>)();
       if (!isPromptPresentation(assembly)) return assembly;
-      const hidden = new Set(denyNames(this.policy(state.agent), state.baseline, state.exposures));
-      if (hidden.size === 0) return assembly;
+      const policy = this.policy(state.agent);
+      const hidden = new Set(denyNames(policy, state.baseline, state.exposures));
+      const folded = foldedGroups(policy, state.exposures);
+      if (hidden.size === 0 && folded.length === 0 && policy.disabled.length === 0) return assembly;
       // DSH < 0.2.2: the waterfall receives a PromptAssembly and the returned
       // tool list is authoritative, so hiding declarations here works.
       // DSH >= 0.2.2: it receives a PromptPresentation (sections/contexts/
@@ -301,10 +305,9 @@ export class ToolPolicyRuntime {
         this.declarationFiltering = false;
         this.warnUnrestrictable();
       }
-      const sections = assembly.sections.filter((section) => {
-        const toolName = section.name.startsWith("tool:") ? section.name.slice("tool:".length) : undefined;
-        return toolName === undefined || !hidden.has(toolName);
-      });
+      const sections = assembly.sections.filter((section) => (
+        !sectionHidden(section.name, state.baseline, policy, folded, hidden)
+      ));
       const filtered: PromptPresentationLike = { ...assembly, sections };
       if (Array.isArray(assembly.tools)) {
         filtered.tools = assembly.tools.filter((schema) => !hidden.has(schema.name));
@@ -892,6 +895,142 @@ function isPromptPresentation(value: unknown): value is PromptPresentationLike {
   if (value === null || typeof value !== "object") return false;
   const record = value as { sections?: unknown };
   return Array.isArray(record.sections);
+}
+
+/**
+ * Shared MCP resource tools published by `@deepseek-ai/dsh-mcp-resources`.
+ *
+ * The package advertises all three in one `mcp-resource-servers` section, so
+ * the section is stale only once the whole family is hidden.
+ */
+const MCP_RESOURCE_TOOLS = [
+  "list_mcp_resources",
+  "list_mcp_resource_templates",
+  "read_mcp_resource",
+] as const;
+
+/**
+ * Whether a prompt section exists only to advertise tools that are all hidden.
+ *
+ * A section that only advertises tools is dead weight once every one of them is
+ * hidden: the model reads an instruction it cannot follow, because the
+ * declaration and the call are both gone. DSH links `tool:<name>` sections to
+ * exactly one tool; other producers encode the family in the section name, and
+ * this resolver extends the same rule by convention instead of hard-coding one
+ * group or one server:
+ * - `tool:<name>` — DSH's per-tool description section;
+ * - `mcp:<server>` — `@deepseek-ai/dsh-mcp-client` instructions for one server,
+ *   covering every `mcp__<server>__*` tool it registered;
+ * - `mcp-resource-servers` — `@deepseek-ai/dsh-mcp-resources` hint for the
+ *   shared resource tools above.
+ *
+ * Membership is read from the baseline *and* from the preset policy. A child
+ * Agent can start with a tool surface already narrowed by an upstream
+ * `tools.restrict()`, so its baseline may not name a single member of a folded
+ * group even though the section is still emitted globally (issue #3).
+ *
+ * @param name - prompt section name.
+ * @param baseline - every tool name this Agent inherited.
+ * @param policy - the preset policy for this Agent.
+ * @param folded - the policy's groups that are not open in this session.
+ * @param hidden - names already denied by `denyNames()` for this Agent.
+ * @returns whether the section must be dropped from the prompt.
+ */
+function sectionHidden(
+  name: string,
+  baseline: readonly string[],
+  policy: PresetToolPolicy,
+  folded: readonly PresetToolPolicy["groups"][number][],
+  hidden: ReadonlySet<string>,
+): boolean {
+  const owners = sectionToolOwners(name, baseline, policy);
+  // Not a tool section: persona, plan policy, delegation rules, and every other
+  // prose contribution is never filtered by this plugin.
+  if (owners === undefined) return false;
+  if (owners.length === 0) {
+    // A namespace section whose tools this Agent never inherited. Only a folded
+    // pattern that spells out this very namespace proves it stale.
+    const prefix = mcpServerPrefix(name);
+    return prefix !== undefined && folded.some((group) => (
+      group.patterns.some((pattern) => pattern.startsWith(prefix) && pattern.length > prefix.length)
+    ));
+  }
+  return owners.every((tool) => hidden.has(tool) || policyHides(policy, folded, tool));
+}
+
+/**
+ * The tools a prompt section exists to introduce.
+ *
+ * @param name - prompt section name.
+ * @param registeredNames - every tool name in the Agent's baseline.
+ * @param policy - the preset policy, whose literal names count as members.
+ * @returns the owned tool names (possibly empty when the family is known only
+ *   by a wildcard pattern), or `undefined` when the section is not owned by a
+ *   tool family and must always be kept.
+ */
+function sectionToolOwners(
+  name: string,
+  registeredNames: readonly string[],
+  policy: PresetToolPolicy,
+): readonly string[] | undefined {
+  if (name.startsWith("tool:")) return [name.slice("tool:".length)];
+  if (name === "mcp-resource-servers") return MCP_RESOURCE_TOOLS;
+  const prefix = mcpServerPrefix(name);
+  if (prefix === undefined) return undefined;
+  const members = new Set(registeredNames.filter((tool) => tool.startsWith(prefix)));
+  for (const declared of declaredToolNames(policy)) {
+    if (declared.startsWith(prefix)) members.add(declared);
+  }
+  return [...members];
+}
+
+/** The `mcp__<server>__` tool-name prefix an `mcp:<server>` section covers. */
+function mcpServerPrefix(sectionName: string): string | undefined {
+  if (!sectionName.startsWith("mcp:")) return undefined;
+  const server = sectionName.slice("mcp:".length);
+  return server ? `mcp__${server}__` : undefined;
+}
+
+/** Every tool name the policy spells out, including exact group patterns. */
+function declaredToolNames(policy: PresetToolPolicy): string[] {
+  const names = [...policy.disabled];
+  for (const group of policy.groups) {
+    for (const pattern of group.patterns) {
+      if (!pattern.includes("*")) names.push(pattern);
+    }
+  }
+  return names;
+}
+
+/** Groups that are not open in this Agent, so their members stay folded. */
+function foldedGroups(
+  policy: PresetToolPolicy,
+  exposures: ReadonlySet<string>,
+): PresetToolPolicy["groups"] {
+  const open = new Set([...exposures].map((name) => name.toLowerCase()));
+  return policy.groups.filter((group) => !open.has(group.name.toLowerCase()));
+}
+
+/**
+ * Whether the preset policy alone hides a tool, independent of the tool
+ * surface this Agent inherited.
+ *
+ * `denyNames()` can only deny names that are present, because `restrict()`
+ * rejects unknown ones. A section must not depend on that: the child Agent of
+ * a delegation inherits a narrowed tool set before this plugin installs, so
+ * the folded group resolves to zero tools there while the section — registered
+ * globally by the tool's own plugin — is still emitted for everyone.
+ */
+function policyHides(
+  policy: PresetToolPolicy,
+  folded: readonly PresetToolPolicy["groups"][number][],
+  toolName: string,
+): boolean {
+  // Mirrors `denyNames()`: the PTC transport and the discovery tool are never
+  // folded, so neither may lose its section to a stray group pattern.
+  if (toolName === PTC_TRANSPORT_NAME || toolName === DISCOVERY_TOOL_NAME) return false;
+  if (policy.disabled.includes(toolName)) return true;
+  return folded.some((group) => matchesAnyPattern(toolName, group.patterns));
 }
 
 function errorMessage(error: unknown): string {

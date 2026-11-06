@@ -5,10 +5,20 @@
 
 ## [Unreleased]
 
+## [1.2.12] - 2026-11-06
+
 ### Fixed
 
+- 修复「折叠的 `tool:*` 提示词段在子代理上未被隐藏」（issue #3）。子代理在 tool-manager install 之前就被委派层 `childCtx.tools.restrict(toolFilter)` 裁过工具面，baseline 里可能一个被折叠工具都没有，`denyNames()` 因此返回空、`system-prompt/assemble` 直接放行，全局注册的 `tool:<名称>` 段照旧出现在子代理提示词里。现在段落判定不再只依赖 baseline：只要该工具落在预设的 `disabled` 里，或命中某个未 open 的按需组 patterns，就按「已折叠」处理并删除其说明段；`tool:<名称>`、`mcp:<服务器>`、`mcp-resource-servers` 三种段落都适用。族内成员取 baseline 与实际策略字面名的并集，全部被隐藏才删除，任一可见则保留。
+- 修复「工具已收进按需组或已关闭，系统提示词里却仍保留只介绍这些工具的段落」的问题。此前只按 `tool:<名称>` 剔除单工具说明段，因此 MCP 的 `mcp-resource-servers`（三个共享资源工具）和 `mcp:<服务器>`（服务器 instructions）即使对应工具全部不可见也照样出现在提示词里，模型会读到「可以调用」的指令却找不到工具，调用还会被 guard 拒绝。DSH 的提示词段落没有工具归属元数据，现在按命名约定把段落归到工具族：`tool:<名称>`、`mcp:<服务器>`（该服务器全部 `mcp__<服务器>__*` 工具）、`mcp-resource-servers`（三个共享资源工具）。族内工具**全部**被隐藏时整段删除，任一工具可见则保留；无归属或族内没有注册工具的段落不处理。
 - 修复「安装新插件后，把它的工具加入按需组，新旧会话都不生效，必须重启 DSH」的问题。按需组是否有效取决于该 Agent 的 baseline（继承工具名快照），而 baseline 只在 `install()`（`agent/created`）与 `tools/change` 时刷新；插件热装/组合重载可能把工具注册落在两者之间，于是组解析为 0 个工具、从目录里消失，组内工具反而一直可见，直到重启重建快照。现在每一步都在 `tools.resolve()` 之前、`agent/pre-step` 里以及 `tool_list` 打开组时用 live `schemas(agent)` 核对 baseline（一次 map 遍历）：只要 live 面出现快照没有的名字，就立即采用并 `reconcile()`，新工具在当步就归入按需组并从该步的工具集合中剔除，目录同一步更新，不需要重启。只对「新增」生效——工具面收缩可能是组合切换的空窗，仍交给 `tools/change` 的防抖刷新，避免为一步把组内工具放出来。
 - 修复本插件的 HTTP 路由在插件重载后残留的问题：`context.inject(["webServer"], ...)` 的回调没有保留也没有返回 `webServer.register()` 的 disposer，重载后新实例注册同一路径会抛 `webserver: duplicate exact route`，而旧实例的 handler 仍在服务——设置页会继续读写一个已经没人驱动的 runtime。现在所有路由的 disposer 都被收集，并在注入作用域卸载时统一释放；若中途某条路由被拒绝，已注册的部分也会立刻回滚。
+
+### Changed
+
+- 最低支持的 DSH 版本提升到 `0.2.2-rc.1`（`engines.dsh` 由 `>=0.2.0-rc.2` 改为 `>=0.2.2-rc.1`）。提示词段落隐藏现在依赖 `0.2.2` 的 `PromptPresentation` 语义（工具声明在 waterfall 之后挂回），工具隐藏依赖 `tools.resolve()` 的 per-step 过滤，两者都是 `0.2.2` 才有的能力。仍停留在 `0.2.0` / `0.2.1` 的用户请继续使用 `1.2.11`；升级到 `0.2.2` 前记得移除 `tools.mode` / `DSH_TOOLS_MODE`，并把 Node.js 升到 24.9 以上。
+- README 同步适配范围（`>=0.2.2-rc.1`，旧版用 `1.2.11`）。
+- 版本提升至 `1.2.12`。
 
 ## [1.2.11] - 2026-11-05
 
