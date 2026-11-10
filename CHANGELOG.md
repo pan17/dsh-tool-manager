@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+## [1.2.13] - 2026-11-10
+
+### Fixed
+
+- 修复「按需组的开放状态读不出来」的问题：恢复逻辑只按 provider 形状读取 `tool/result`（`message.content` 里的 `tool-result` 块），而 DSH 落盘的是它自己的工具消息（`toolCallId` / `isError` 在 message 上，`content` 是 text/image 块）。于是原生 `tool_list` 调用在真实会话里一条都匹配不上，`restoredExposureNames()` 始终返回空——不只是 fork，重启 DSH 并恢复同一 Session 后组也照样隐藏。现在两种形状都读，错误结果（`isError`）仍然不算开放。
+- 修复「`tool_list` 打开的按需组在 fork 出来的子会话里重新隐藏」的问题。此前恢复开放状态时跳过 `inheritedEventCount` 之前的 fork 前缀，于是子会话的历史里明明有一条成功的 `tool_list` 结果（写着这些工具「在本会话内可用」），工具却不在该步的工具集合里，模型调用还会被 guard 拒绝。现在恢复会读完整份 Session 日志，fork 子会话沿用 fork 点之前已开放的组；fork 点之后父 Session 新打开的组不在子会话日志里，仍保持隐藏，全新会话没有前缀，行为不变。
+
 ## [1.2.12] - 2026-11-06
 
 ### Fixed

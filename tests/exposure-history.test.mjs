@@ -21,6 +21,26 @@ function call(callId, group, name = "tool_list") {
 }
 
 function result(callId, isError = false) {
+  // The shape DSH persists: its own tool message, identity and error on the message.
+  return {
+    type: "tool/result",
+    data: {
+      turn: 1,
+      step: 1,
+      message: {
+        role: "tool",
+        source: { kind: "tool", callId },
+        toolCallId: callId,
+        content: [{ type: "text", text: "{}" }],
+        isError,
+        id: `result-${callId}`,
+      },
+    },
+  };
+}
+
+function providerResult(callId, isError = false) {
+  // A provider-shaped message keeps the tool-result block inside content.
   return {
     type: "tool/result",
     data: {
@@ -76,7 +96,17 @@ describe("tool_list exposure history", () => {
     assert.deepEqual([...restored], ["Browser", "String Args"]);
   });
 
-  it("does not inherit a parent Session's exposure across a fork", () => {
+  it("reads a provider-shaped tool result as well", () => {
+    const restored = restoredExposureNames(session([
+      call("a", "Provider Group"),
+      providerResult("a"),
+      call("b", "Provider Failure"),
+      providerResult("b", true),
+    ]));
+    assert.deepEqual([...restored], ["Provider Group"]);
+  });
+
+  it("restores the groups a fork inherited from its parent prefix", () => {
     const restored = restoredExposureNames(session([
       call("parent", "Parent Group"),
       result("parent"),
@@ -84,10 +114,19 @@ describe("tool_list exposure history", () => {
       call("child", "Child Group"),
       result("child"),
     ], 3));
-    assert.deepEqual([...restored], ["Child Group"]);
+    assert.deepEqual([...restored], ["Parent Group", "Child Group"]);
   });
 
-  it("tolerates missing Sessions and invalid fork boundaries", () => {
+  it("leaves groups closed when the fork point predates the call that opened them", () => {
+    // A group the parent opened after the fork is not in the child's log at all.
+    const restored = restoredExposureNames(session([
+      { type: "user/message", data: { source: { kind: "user" } } },
+      { type: "session/end-seed", data: { inherited: true } },
+    ], 2));
+    assert.deepEqual([...restored], []);
+  });
+
+  it("tolerates a missing Session and ignores the inherited boundary it no longer reads", () => {
     assert.deepEqual([...restoredExposureNames(undefined)], []);
     const restored = restoredExposureNames({
       ...session([call("x", "Recovered"), result("x")]),

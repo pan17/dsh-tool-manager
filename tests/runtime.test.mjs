@@ -8,12 +8,12 @@ function resumedSession() {
     { type: "tool/call", data: { callId: "open-1", name: "tool_list", arguments: JSON.stringify({ group: "GitHub" }) } },
     {
       type: "tool/result",
-      data: { message: { content: [{ type: "tool-result", toolCallId: "open-1", content: [], isError: false }] } },
+      data: { message: { role: "tool", source: { kind: "tool", callId: "open-1" }, toolCallId: "open-1", content: [{ type: "text", text: "{}" }], isError: false } },
     },
     { type: "tool/call", data: { callId: "old-1", name: "tool_list", arguments: JSON.stringify({ group: "Removed" }) } },
     {
       type: "tool/result",
-      data: { message: { content: [{ type: "tool-result", toolCallId: "old-1", content: [], isError: false }] } },
+      data: { message: { role: "tool", source: { kind: "tool", callId: "old-1" }, toolCallId: "old-1", content: [{ type: "text", text: "{}" }], isError: false } },
     },
   ];
   return {
@@ -785,6 +785,70 @@ describe("ToolPolicyRuntime restart recovery", () => {
     runtime.start();
 
     assert.deepEqual(applied.at(-1), ["web_search", "write"]);
+    await runtime.dispose();
+  });
+
+  it("keeps a fork's inherited group open and still hides the groups it never opened", async () => {
+    const applied = [];
+    const schemas = ["tool_list", "mcp__github__issue", "web_search", "write"].map((name) => ({
+      name,
+      description: name,
+      parameters: {},
+    }));
+    const scopedTools = {
+      schemas() { return schemas; },
+      register() { throw new Error("scope register should not be used"); },
+      restrict({ deny }) {
+        applied.push([...deny]);
+        return () => {};
+      },
+    };
+    // The parent opened "Web" before the fork; the child continues that replayed log.
+    const inherited = [
+      { type: "tool/call", data: { callId: "parent-open", name: "tool_list", arguments: JSON.stringify({ group: "Web" }) } },
+      {
+        type: "tool/result",
+        data: { message: { role: "tool", source: { kind: "tool", callId: "parent-open" }, toolCallId: "parent-open", content: [{ type: "text", text: "{}" }], isError: false } },
+      },
+    ];
+    const forkLog = [...inherited, { type: "session/end-seed", data: { inherited: true } }];
+    const agent = {
+      ctx: { get(name) { return name === "tools" ? scopedTools : undefined; }, on() {} },
+      session: {
+        seq: forkLog.length,
+        inheritedEventCount: inherited.length,
+        eventAt(seq) {
+          const event = forkLog[seq];
+          return event === undefined ? undefined : { seq, ...event };
+        },
+        surface: { nodes: [] },
+      },
+    };
+    const context = {
+      get(name) {
+        if (name === "tools") return { schemas() { return schemas; }, register() { return () => {}; }, restrict() { return () => {}; } };
+        if (name === "agents") return { list: () => [agent] };
+        return undefined;
+      },
+      on() {},
+    };
+    const presets = { composedPreset: () => "standard" };
+    const settings = {
+      presets: {
+        standard: {
+          disabled: ["write"],
+          groups: [
+            { name: "GitHub", patterns: ["mcp__github__issue"] },
+            { name: "Web", patterns: ["web_search"] },
+          ],
+        },
+      },
+    };
+
+    const runtime = new ToolPolicyRuntime(context, presets, settings);
+    runtime.start();
+
+    assert.deepEqual(applied.at(-1), ["mcp__github__issue", "write"]);
     await runtime.dispose();
   });
 });

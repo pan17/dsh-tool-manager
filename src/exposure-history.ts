@@ -4,9 +4,13 @@ import { DISCOVERY_TOOL_NAME } from "./types.js";
 /**
  * Rebuild the on-demand groups successfully opened in one Session.
  *
- * The tool call/result log is the durable source of truth. This intentionally
- * excludes a fork's inherited prefix so temporary capability choices do not
- * leak from the parent Session into a new child Session.
+ * The tool call/result log is the durable source of truth, and a fork's
+ * inherited prefix counts: the child continues the same transcript, whose
+ * `tool_list` result already told the model those tools are available for the
+ * rest of the session. Hiding them again would contradict the history the
+ * model reads, so a fork starts from the groups its shared prefix opened.
+ * Groups the parent opened after the fork point are not in the child's log and
+ * stay closed, as does every group on a Session that never opened one.
  */
 export function restoredExposureNames(
   session: AgentSessionLike | undefined,
@@ -15,8 +19,7 @@ export function restoredExposureNames(
   if (!session) return restored;
 
   const pending = new Map<string, string>();
-  const start = validBoundary(session.inheritedEventCount, session.seq);
-  for (let seq = start; seq < session.seq; seq += 1) {
+  for (let seq = 0; seq < session.seq; seq += 1) {
     const event = session.eventAt(seq);
     if (!event) continue;
     if (event.type === "tool/call") {
@@ -49,16 +52,38 @@ function settleNativeCall(
   pending: Map<string, string>,
   restored: Set<string>,
 ): void {
-  const data = asRecord(event.data);
-  const message = asRecord(data?.message);
-  const content = Array.isArray(message?.content) ? message.content : [];
-  const result = content.map(asRecord).find((block) => block?.type === "tool-result");
-  const callId = result?.toolCallId;
-  if (typeof callId !== "string") return;
-  const group = pending.get(callId);
+  const settled = settledCall(asRecord(asRecord(event.data)?.message));
+  if (settled === undefined) return;
+  const group = pending.get(settled.callId);
   if (group === undefined) return;
-  pending.delete(callId);
-  if (result?.isError !== true) restored.add(group);
+  pending.delete(settled.callId);
+  if (!settled.isError) restored.add(group);
+}
+
+/**
+ * The call identity and error flag of one `tool/result` message.
+ *
+ * DSH stores its own tool message — `toolCallId` and `isError` on the message,
+ * text/image blocks in `content` — while a provider-shaped message carries an
+ * Anthropic-style `tool-result` block inside `content`. Read both, so restore
+ * never depends on which one the Host wrote.
+ */
+function settledCall(
+  message: Record<string, unknown> | undefined,
+): { callId: string; isError: boolean } | undefined {
+  if (!message) return undefined;
+  const source = asRecord(message.source);
+  const direct = nonEmpty(message.toolCallId) ?? nonEmpty(source?.callId);
+  if (direct !== undefined) return { callId: direct, isError: message.isError === true };
+  const content = Array.isArray(message.content) ? message.content : [];
+  const block = content.map(asRecord).find((item) => item?.type === "tool-result");
+  const blockId = nonEmpty(block?.toolCallId);
+  if (blockId === undefined) return undefined;
+  return { callId: blockId, isError: block?.isError === true };
+}
+
+function nonEmpty(value: unknown): string | undefined {
+  return typeof value === "string" && value !== "" ? value : undefined;
 }
 
 function restorePtcDispatch(
@@ -84,11 +109,6 @@ function groupFromArguments(value: unknown): string | undefined {
   if (typeof group !== "string") return undefined;
   const trimmed = group.trim();
   return trimmed || undefined;
-}
-
-function validBoundary(value: unknown, end: number): number {
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) return 0;
-  return Math.min(value, end);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
