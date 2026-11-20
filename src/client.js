@@ -84,7 +84,7 @@ window.__ModuleLoader__.load({
 			return next;
 		}
 		function policyPayload(policy) {
-			return {
+			const payload = {
 				disabled: [...(policy.disabled || [])],
 				groups: (policy.groups || []).map((group) => ({
 					name: group.name,
@@ -92,6 +92,8 @@ window.__ModuleLoader__.load({
 					patterns: [...(group.patterns || [])],
 				})),
 			};
+			if (policy.mode === "mcp") payload.mode = "mcp";
+			return payload;
 		}
 		/**
 		 * Project one Preset's whole policy onto another Preset.
@@ -366,6 +368,21 @@ window.__ModuleLoader__.load({
 					const disabled = new Set(target.policy.disabled || []);
 					if (disabled.has(name)) disabled.delete(name); else disabled.add(name);
 					target.policy.disabled = [...disabled];
+				});
+			}
+
+			function setMode(mode) {
+				mutatePreset((target) => {
+					if (mode === "mcp") {
+						target.policy.mode = "mcp";
+						if (!target.policy.mcp) {
+							const defaults = ["read", "edit", "grep", "pwsh", "skill", "ask_user_question", "tool_find", "tool_call"];
+							const names = new Set((target.tools || []).map((tool) => tool.name));
+							target.policy.mcp = { expose: defaults.filter((name) => names.has(name)) };
+						}
+					} else {
+						delete target.policy.mode;
+					}
 				});
 			}
 
@@ -661,6 +678,9 @@ window.__ModuleLoader__.load({
 			function save() {
 				for (const item of draft.presets || []) {
 					if (item.broken) continue;
+					// Groups are inert in mcp mode, so a stale/empty group must not
+					// block saving the mode switch.
+					if (item.policy.mode === "mcp") continue;
 					const issues = groupDraftIssues(item);
 					if (issues.disabledMembers.length) {
 						const issue = issues.disabledMembers[0];
@@ -694,6 +714,7 @@ window.__ModuleLoader__.load({
 
 			const disabled = new Set(preset.policy.disabled || []);
 			const grouped = groupedNames(preset);
+			const mcpMode = preset.policy.mode === "mcp";
 			const autoGroupCandidates = (preset.tools || []).filter((tool) => !disabled.has(tool.name) && !grouped.has(tool.name));
 			const stats = catalogStats(preset);
 			const presetPolicy = preset.policy || { disabled: [], groups: [] };
@@ -711,8 +732,8 @@ window.__ModuleLoader__.load({
 			});
 			const showGroups = filter === "all" || filter === "cold";
 			const visibleTools = (preset.tools || []).filter((tool) => {
-				if (filter === "cold") return false;
 				if (!matchesQuery(tool, needle)) return false;
+				if (filter === "cold") return false;
 				if (filter === "disabled") return disabled.has(tool.name);
 				if (filter === "live") return !disabled.has(tool.name) && !grouped.has(tool.name);
 				return !grouped.has(tool.name);
@@ -1112,7 +1133,7 @@ window.__ModuleLoader__.load({
 
 			return h("div", { className: "tm_root" },
 				h("div", { className: "tm_head" },
-					h("div", null, h("h2", null, "Agent 工具管理"), h("div", { className: "tm_muted" }, "按每个 Agent 预设开关工具。点「手动分组」把不常用的收进按需组：平时模型看不到，需要时先查目录再打开。")),
+					h("div", null, h("h2", null, "Agent 工具管理"), h("div", { className: "tm_muted" }, "按每个 Agent 预设开关工具。点「手动分组」把不常用的收进按需组：平时模型看不到，需要时先查目录再打开；也可以在下方切换为「MCP 按需」，让模型用 tool_find / tool_call 按需加载。")),
 					h("div", { className: "tm_row" },
 						h("button", { className: "tm_btn", onClick: reload, disabled: busy || autoGrouping }, "刷新"),
 						h("button", { className: "tm_btn primary", onClick: save, disabled: busy || autoGrouping || !draft.writable || !dirty }, busy ? "处理中…" : "保存"),
@@ -1135,16 +1156,26 @@ window.__ModuleLoader__.load({
 						}, draft.presets.map((item) => h("option", { key: item.id, value: item.id }, (item.name || item.id) + " · " + (item.tools || []).length + " 个工具" + (item.isDefault ? " · 默认" : "") + (item.trust === "user" ? " · 用户" : "")))),
 					),
 				),
+				h("div", { className: "tm_row", style: { padding: "0 14px 10px" } },
+					h("span", { className: "tm_muted" }, "加载模式"),
+					h("button", { className: "tm_chip" + (mcpMode ? "" : " active"), onClick: () => setMode("groups") }, "按需组"),
+					h("button", { className: "tm_chip" + (mcpMode ? " active" : ""), onClick: () => setMode("mcp") }, "MCP 按需"),
+					mcpMode ? h("span", { className: "tm_muted" }, "分组照常生效：组内工具不在工具表里，模型只看到组名与描述，用 tool_find({ group }) 查整组用法。") : null,
+				),
 				preset.broken ? h("div", { className: "tm_error" }, preset.broken) : null,
 				autoGroupError ? h("div", { className: "tm_error" }, autoGroupError) : null,
 				h("section", { className: "tm_panel" },
 					h("div", { className: "tm_panel_head" },
 						h("div", null,
 							h("b", null, "工具目录"),
-							h("div", { className: "tm_muted" }, "关掉后立刻对模型隐藏。按需组默认隐藏，模型要先调用 tool_list 打开所在组才能使用。"),
-							h("div", { className: "tm_muted" }, "tool_list 只在当前 Preset 有有效按需组时才出现（保存后从下一个模型步骤生效），没有有效按需组时模型看不到它；它由插件自动管理，不出现在本页工具目录中，也不能在这里开关或分组。"),
+							h("div", { className: "tm_muted" }, mcpMode
+								? "关掉后立刻对模型隐藏。按需组只声明组名与描述，组内工具不单独声明；模型用 tool_find 读取整组用法后可直接按名调用，不需要开组。"
+								: "关掉后立刻对模型隐藏。按需组默认隐藏，模型要先调用 tool_list 打开所在组才能使用。"),
+							h("div", { className: "tm_muted" }, mcpMode
+								? "tool_find 由插件自动注册，不出现在本页目录中，也不能在这里开关或分组；它只在当前 Preset 有有效按需组时出现。"
+								: "tool_list 只在当前 Preset 有有效按需组时才出现（保存后从下一个模型步骤生效），没有有效按需组时模型看不到它；它由插件自动管理，不出现在本页工具目录中，也不能在这里开关或分组。"),
 						),
-						h("div", { className: "tm_row" },
+						mcpMode ? null : h("div", { className: "tm_row" },
 							h("button", { className: "tm_btn", onClick: startAutoGroup, disabled: autoGrouping || autoGroupCandidates.length === 0, title: autoGroupCandidates.length ? "用默认模型对未分组且未关闭的工具进行聚类" : "没有可自动分组的工具" }, autoGrouping ? "自动分组中…" : "自动分组"),
 							h("button", { className: "tm_btn", onClick: openCreate, disabled: autoGrouping }, "手动分组"),
 							h("button", {

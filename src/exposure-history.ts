@@ -1,5 +1,5 @@
 import type { AgentSessionLike, SessionEventLike } from "./dsh.js";
-import { DISCOVERY_TOOL_NAME } from "./types.js";
+import { DISCOVERY_TOOL_NAME, MCP_OPEN_TOOL_NAME } from "./types.js";
 
 /**
  * Rebuild the on-demand groups successfully opened in one Session.
@@ -15,6 +15,27 @@ import { DISCOVERY_TOOL_NAME } from "./types.js";
 export function restoredExposureNames(
   session: AgentSessionLike | undefined,
 ): Set<string> {
+  return restoredNames(session, DISCOVERY_TOOL_NAME, "group");
+}
+
+/**
+ * Rebuild the individual tools opened with `tool_open` in one Session.
+ *
+ * Same durability rule as the group restore: a successful call (native or PTC)
+ * is the fact that the tool is directly callable for the rest of the session,
+ * and a fork inherits the calls in its shared prefix.
+ */
+export function restoredOpenedToolNames(
+  session: AgentSessionLike | undefined,
+): Set<string> {
+  return restoredNames(session, MCP_OPEN_TOOL_NAME, "name");
+}
+
+function restoredNames(
+  session: AgentSessionLike | undefined,
+  toolName: string,
+  field: string,
+): Set<string> {
   const restored = new Set<string>();
   if (!session) return restored;
 
@@ -23,7 +44,7 @@ export function restoredExposureNames(
     const event = session.eventAt(seq);
     if (!event) continue;
     if (event.type === "tool/call") {
-      rememberNativeCall(event, pending);
+      rememberNativeCall(event, pending, toolName, field);
       continue;
     }
     if (event.type === "tool/result") {
@@ -31,7 +52,7 @@ export function restoredExposureNames(
       continue;
     }
     if (event.type === "tool/ptc-dispatch") {
-      restorePtcDispatch(event, restored);
+      restorePtcDispatch(event, restored, toolName, field);
     }
   }
   return restored;
@@ -40,11 +61,13 @@ export function restoredExposureNames(
 function rememberNativeCall(
   event: SessionEventLike,
   pending: Map<string, string>,
+  toolName: string,
+  field: string,
 ): void {
   const data = asRecord(event.data);
-  if (data?.name !== DISCOVERY_TOOL_NAME || typeof data.callId !== "string") return;
-  const group = groupFromArguments(data.arguments);
-  if (group !== undefined) pending.set(data.callId, group);
+  if (data?.name !== toolName || typeof data.callId !== "string") return;
+  const value = fieldFromArguments(data.arguments, field);
+  if (value !== undefined) pending.set(data.callId, value);
 }
 
 function settleNativeCall(
@@ -54,10 +77,10 @@ function settleNativeCall(
 ): void {
   const settled = settledCall(asRecord(asRecord(event.data)?.message));
   if (settled === undefined) return;
-  const group = pending.get(settled.callId);
-  if (group === undefined) return;
+  const value = pending.get(settled.callId);
+  if (value === undefined) return;
   pending.delete(settled.callId);
-  if (!settled.isError) restored.add(group);
+  if (!settled.isError) restored.add(value);
 }
 
 /**
@@ -68,9 +91,7 @@ function settleNativeCall(
  * Anthropic-style `tool-result` block inside `content`. Read both, so restore
  * never depends on which one the Host wrote.
  */
-function settledCall(
-  message: Record<string, unknown> | undefined,
-): { callId: string; isError: boolean } | undefined {
+function settledCall(message: Record<string, unknown> | undefined): { callId: string; isError: boolean } | undefined {
   if (!message) return undefined;
   const source = asRecord(message.source);
   const direct = nonEmpty(message.toolCallId) ?? nonEmpty(source?.callId);
@@ -89,25 +110,27 @@ function nonEmpty(value: unknown): string | undefined {
 function restorePtcDispatch(
   event: SessionEventLike,
   restored: Set<string>,
+  toolName: string,
+  field: string,
 ): void {
   const data = asRecord(event.data);
-  if (data?.name !== DISCOVERY_TOOL_NAME || data.isError === true) return;
-  const group = groupFromArguments(data.arguments);
-  if (group !== undefined) restored.add(group);
+  if (data?.name !== toolName || data.isError === true) return;
+  const value = fieldFromArguments(data.arguments, field);
+  if (value !== undefined) restored.add(value);
 }
 
-function groupFromArguments(value: unknown): string | undefined {
-  let args: unknown = value;
+function fieldFromArguments(value: unknown, field: string): string | undefined {
+  let args = value;
   if (typeof args === "string") {
     try {
-      args = JSON.parse(args) as unknown;
+      args = JSON.parse(args);
     } catch {
       return undefined;
     }
   }
-  const group = asRecord(args)?.group;
-  if (typeof group !== "string") return undefined;
-  const trimmed = group.trim();
+  const raw = asRecord(args)?.[field];
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw.trim();
   return trimmed || undefined;
 }
 

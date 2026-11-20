@@ -17,6 +17,8 @@ import { ToolPolicyRuntime } from "./runtime.js";
 import { buildSnapshot, mergeSchemas } from "./snapshot.js";
 import {
   DISCOVERY_TOOL_NAME,
+  MCP_OPEN_TOOL_NAME,
+  MCP_FIND_TOOL_NAME,
   PTC_TRANSPORT_NAME,
   TOOL_MANAGER_PROBE_SESSION_ID,
   type ToolManagerSnapshot,
@@ -418,6 +420,7 @@ export function apply(ctx: unknown): void {
       // a group that closed or a tool the user disabled is not a lost
       // registration, and reporting it would be a false alarm.
       if (toolName === DISCOVERY_TOOL_NAME || toolName === PTC_TRANSPORT_NAME) return true;
+      if (toolName === MCP_FIND_TOOL_NAME || toolName === MCP_OPEN_TOOL_NAME) return true;
       const policy = policyFor(config.get(), presetId);
       if (policy.disabled.includes(toolName)) return true;
       return policy.groups.some((group) => matchesAnyPattern(toolName, group.patterns));
@@ -542,7 +545,12 @@ export function apply(ctx: unknown): void {
           await defaultPreset.ensure();
           const standing = await schemasForPreset(live.presets, live.tools, presetId);
           const schemas = mergeSchemas(standing, await catalog.schemasFor(presetId))
-            .filter((schema) => schema.name !== DISCOVERY_TOOL_NAME && schema.name !== PTC_TRANSPORT_NAME);
+            .filter((schema) => (
+              schema.name !== DISCOVERY_TOOL_NAME
+              && schema.name !== PTC_TRANSPORT_NAME
+              && schema.name !== MCP_FIND_TOOL_NAME
+              && schema.name !== MCP_OPEN_TOOL_NAME
+            ));
           const selected = selectSuggestionTools(schemas, body?.toolNames);
           const otherGroupNames = normalizeGroupNames(body?.otherGroupNames);
           const timeoutMs = body?.timeoutMs === undefined
@@ -582,7 +590,12 @@ export function apply(ctx: unknown): void {
           await defaultPreset.ensure();
           const standing = await schemasForPreset(live.presets, live.tools, presetId);
           const schemas = mergeSchemas(standing, await catalog.schemasFor(presetId))
-            .filter((schema) => schema.name !== DISCOVERY_TOOL_NAME && schema.name !== PTC_TRANSPORT_NAME);
+            .filter((schema) => (
+              schema.name !== DISCOVERY_TOOL_NAME
+              && schema.name !== PTC_TRANSPORT_NAME
+              && schema.name !== MCP_FIND_TOOL_NAME
+              && schema.name !== MCP_OPEN_TOOL_NAME
+            ));
           const selected = selectSuggestionTools(schemas, body?.toolNames);
           const otherGroupNames = normalizeGroupNames(body?.otherGroupNames);
           const timeoutMs = body?.timeoutMs === undefined
@@ -754,6 +767,9 @@ export async function assertNoEmptyGroups(
   const inventory = await presets.compositionInventory();
   const inspectable = new Map(inventory.map((item) => [item.id, item]));
   for (const [presetId, policy] of Object.entries(settings.presets)) {
+    // Groups stay in the config for mcp-mode presets but never drive loading,
+    // so an empty (or stale) group must not block saving that mode.
+    if (policy.mode === "mcp") continue;
     if (policy.groups.length === 0) continue;
     const composition = inspectable.get(presetId);
     if (!composition || composition.broken) continue;
