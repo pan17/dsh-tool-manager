@@ -14,13 +14,24 @@ import {
   isEnterDecision,
 } from "./catalog.js";
 import { restoredExposureNames } from "./exposure-history.js";
+import {
+  applyMcpNoticeDecision,
+  createMcpToolDefinitions,
+  mcpNoticeHistory,
+  groupLookup,
+  type McpGroupLookupResult,
+} from "./mcp-mode.js";
 import { PresetBindingRepair, type RepairAgentDiagnostics, type RepairDiagnostics } from "./preset-repair.js";
 import type { UserNoticeInput } from "./notices.js";
 import { PromptToolAffinity } from "./prompt-affinity.js";
 import {
+  asRecord,
   denyNames,
   findGroup,
+  isMcpMode,
   matchesAnyPattern,
+  mcpGroupedNames,
+  mcpGroups,
   parseKnownRestrictable,
   policyFor,
   resolveActiveGroups,
@@ -28,6 +39,7 @@ import {
 } from "./policy.js";
 import {
   DISCOVERY_TOOL_NAME,
+  MCP_FIND_TOOL_NAME,
   PTC_TRANSPORT_NAME,
   TOOL_MANAGER_PROBE_SESSION_ID,
   type PresetToolPolicy,
@@ -68,6 +80,9 @@ export class ToolPolicyRuntime {
   private mutating = false;
   private refreshQueued = false;
   private discoveryDisposer?: () => void;
+  /** The MCP-style proxy pair, registered only while some preset uses mcp mode. */
+  private mcpDisposers: Array<() => void> = [];
+  private mcpRegistered = false;
   /**
    * Whether `system-prompt/assemble` still owns the tool declarations.
    * DSH < 0.2.2 hands over a PromptAssembly (declarations included);
@@ -119,6 +134,7 @@ export class ToolPolicyRuntime {
       (this.ctx as ContextLike & { registry?: unknown }).registry,
     );
     this.registerDiscovery();
+    this.syncMcpTools();
     this.installStepFilter();
     const agents = this.ctx.get<{ list(): AgentLike[] }>("agents");
     for (const agent of agents?.list() ?? []) this.install(agent);
@@ -137,16 +153,29 @@ export class ToolPolicyRuntime {
 
   update(next: ToolManagerSettings): void {
     this.settings = next;
+    // Registering or dropping the discovery tool changes the inherited surface,
+    // so every live baseline has to be re-snapshotted before the next step.
+    const mcpChanged = this.syncMcpTools();
     for (const state of this.states.values()) {
+      // Groups can be edited at any time, so the exposure set is re-derived on
+      // every update instead of being trusted from the previous policy:
+      //  - group mode stores group names, and a renamed or deleted group must go;
+      //  - mcp mode stores nothing today, but the set is cleared so a switch back
+      //    to group mode never inherits stale names from an earlier policy.
+      const policy = this.policy(state.agent);
+      if (isMcpMode(policy)) {
+        state.exposures.clear();
+        continue;
+      }
       const known = new Set(
-        resolveActiveGroups(this.policy(state.agent), state.baseline)
-          .map((group) => group.name.toLowerCase()),
+        resolveActiveGroups(policy, state.baseline).map((group) => group.name.toLowerCase()),
       );
       for (const name of [...state.exposures]) {
         if (!known.has(name.toLowerCase())) state.exposures.delete(name);
       }
-      this.reconcile(state);
     }
+    if (mcpChanged) this.refreshAllBaselines();
+    for (const state of this.states.values()) this.reconcile(state);
   }
 
   private install(agent: AgentLike): void {
@@ -155,12 +184,15 @@ export class ToolPolicyRuntime {
 
     const baselineSchemas = this.inheritedSchemas(agent);
     const baseline = baselineSchemas.map((schema) => schema.name);
-    const groups = resolveActiveGroups(this.policy(agent), baseline);
-    const restored = restoredExposureNames(agent.session);
+    const policy = this.policy(agent);
     const exposures = new Set<string>();
-    for (const name of restored) {
-      const group = findGroup(groups, name);
-      if (group) exposures.add(group.name);
+    if (!isMcpMode(policy)) {
+      const groups = resolveActiveGroups(policy, baseline);
+      const restored = restoredExposureNames(agent.session);
+      for (const name of restored) {
+        const group = findGroup(groups, name);
+        if (group) exposures.add(group.name);
+      }
     }
     const state: AgentState = {
       agent,
@@ -284,6 +316,14 @@ export class ToolPolicyRuntime {
     const scopedTools = state.agent.ctx.get<ToolRuntimeLike>("tools");
     state.guard = scopedTools?.guard?.((execution) => {
       const policy = this.policy(state.agent);
+      if (isMcpMode(policy)) {
+        // Hidden tools are blocked by step admission (they are not in the step
+        // set), so the guard only has to enforce an explicit disable.
+        if (policy.disabled.includes(execution.name)) {
+          return `tool ${JSON.stringify(execution.name)} is disabled by the tool-manager policy for this Agent preset`;
+        }
+        return undefined;
+      }
       const hidden = denyNames(policy, state.baseline, state.exposures);
       if (!hidden.includes(execution.name)) return undefined;
       if (policy.disabled.includes(execution.name)) {
@@ -473,11 +513,28 @@ export class ToolPolicyRuntime {
     // snapshot would otherwise leave its on-demand group empty here, and the
     // model would never learn the group exists.
     this.syncBaseline(state);
-    const groups = resolveActiveGroups(this.policy(agent), state.baseline);
-    return applyCatalogDecision(
+    const policy = this.policy(agent);
+    if (isMcpMode(policy)) {
+      return applyMcpNoticeDecision(decision, {
+        mode: "mcp",
+        groups: mcpGroups(policy, state.baseline).map((group) => ({
+          name: group.name,
+          ...(group.description ? { description: group.description } : {}),
+        })),
+      }, mcpNoticeHistory(agent));
+    }
+    const groups = resolveActiveGroups(policy, state.baseline);
+    const withCatalog = applyCatalogDecision(
       decision,
       catalogEntriesFromGroups(groups),
       catalogHistory(agent),
+    );
+    // A Session that used to run mcp mode keeps that notice in its history; the
+    // group catalog alone would not contradict it.
+    return applyMcpNoticeDecision(
+      withCatalog,
+      { mode: "groups" },
+      mcpNoticeHistory(agent),
     );
   }
 
@@ -622,6 +679,79 @@ export class ToolPolicyRuntime {
     }
   }
 
+  /**
+   * Register or drop the MCP-style proxy pair.
+   *
+   * The pair only exists while at least one preset runs mcp mode: a groups-only
+   * install must keep its inherited surface byte-for-byte unchanged. Returns
+   * whether the registration state changed, so the caller can re-snapshot every
+   * live baseline.
+   */
+  private syncMcpTools(): boolean {
+    const needed = Object.values(this.settings.presets).some((policy) => isMcpMode(policy));
+    if (needed === this.mcpRegistered) return false;
+    const tools = this.hostTools();
+    if (!tools) return false;
+    this.mutating = true;
+    try {
+      if (!needed) {
+        for (const dispose of this.mcpDisposers.splice(0)) dispose();
+        this.mcpRegistered = false;
+        return true;
+      }
+      const definitions = createMcpToolDefinitions({
+        find: (agent, args) => this.mcpFind(agent, args),
+      });
+      const disposers: Array<() => void> = [];
+      try {
+        for (const definition of definitions) disposers.push(tools.register(definition));
+      } catch (error) {
+        for (const dispose of disposers.splice(0)) dispose();
+        this.warn(
+          `tool-manager failed to register ${MCP_FIND_TOOL_NAME}: ${errorMessage(error)}`,
+        );
+        return false;
+      }
+      this.mcpDisposers = disposers;
+      this.mcpRegistered = true;
+      return true;
+    } finally {
+      this.mutating = false;
+    }
+  }
+
+  /**
+   * Return every member of one on-demand group.
+   *
+   * Group-only on purpose: the catalog the model already reads lists each
+   * group's name and description, so a second keyword path would only add a
+   * slower way to reach the same tools.
+   */
+  private mcpFind(agent: AgentLike | undefined, args: unknown): McpGroupLookupResult {
+    if (!agent) throw new Error(`${MCP_FIND_TOOL_NAME} requires a calling agent`);
+    const state = this.states.get(agent);
+    if (!state) throw new Error("tool manager is not attached to this Agent");
+    // Same reason as tool_list: adopt tools that appeared after the snapshot.
+    this.syncBaseline(state);
+    const policy = this.policy(agent);
+    const groups = mcpGroups(policy, state.baseline);
+    const record = asRecord(args) ?? {};
+    const requested = typeof record.group === "string" ? record.group.trim() : "";
+    const known = groups.map((item) => item.name).join(", ") || "(none)";
+    if (!requested) {
+      throw new Error(`group is required; known groups: ${known}`);
+    }
+    const group = groups.find((item) => item.name.toLowerCase() === requested.toLowerCase());
+    if (!group) {
+      throw new Error(`unknown tool group ${JSON.stringify(requested)}; known groups: ${known}`);
+    }
+    const members = new Set(group.tools);
+    return groupLookup(
+      { name: group.name, ...(group.description ? { description: group.description } : {}) },
+      state.baselineSchemas.filter((schema) => members.has(schema.name)),
+    );
+  }
+
   private discoveryDefinition(): unknown {    return {
       name: DISCOVERY_TOOL_NAME,
       description:
@@ -711,7 +841,15 @@ export class ToolPolicyRuntime {
       const state = this.states.get(agent);
       if (!state) return set;
       if (!isStepToolSet(set)) return set;
-      const hidden = denyNames(this.policy(agent), state.baseline, state.exposures);
+      const policy = this.policy(agent);
+      if (isMcpMode(policy)) {
+        const hidden = new Set(denyNames(policy, state.baseline, state.exposures));
+        const grouped = new Set(mcpGroupedNames(policy, state.baseline));
+        return hidden.size === 0 && grouped.size === 0
+          ? set
+          : projectMcpStepToolSet(set, hidden, grouped);
+      }
+      const hidden = denyNames(policy, state.baseline, state.exposures);
       if (hidden.length === 0) return set;
       return filterStepToolSet(set, new Set(hidden));
     } catch {
@@ -720,8 +858,23 @@ export class ToolPolicyRuntime {
   }
 
   private reconcile(state: AgentState): void {
+    const policy = this.policy(state.agent);
+    if (isMcpMode(policy)) {
+      // Hiding stays in the per-step projection (`tools.resolve` filter): the
+      // mcp mode recomputes visibility whenever a tool is opened, and a scope
+      // local registration cannot be restricted anyway. Keeping the registry
+      // lookup untouched also lets `tools.executable` answer for opened tools.
+      this.mutating = true;
+      try {
+        state.restriction?.();
+        state.restriction = undefined;
+      } finally {
+        this.mutating = false;
+      }
+      return;
+    }
     const deny = denyNames(
-      this.policy(state.agent),
+      policy,
       state.baseline,
       state.exposures,
     );
@@ -800,6 +953,8 @@ export class ToolPolicyRuntime {
     try {
       this.discoveryDisposer?.();
       this.discoveryDisposer = undefined;
+      for (const dispose of this.mcpDisposers.splice(0)) dispose();
+      this.mcpRegistered = false;
     } finally {
       this.mutating = false;
     }
@@ -869,6 +1024,81 @@ function isStepToolSet(value: unknown): value is StepToolSetLike {
  * executable lookup — reads this map, so dropping a registration here is the
  * 0.2.2 equivalent of removing it from the prompt assembly.
  */
+/**
+ * Replace the parameter schema of the listed tools with an empty shell.
+ *
+ * The definition (its execute closure, timeout, presentation callbacks) is
+ * kept, so a model call still runs the real tool and its own argument
+ * validation; only the model-facing schema is reduced. `tool_find` is where the
+ * real parameters are read.
+ */
+function projectMcpStepToolSet(
+  set: StepToolSetLike,
+  hidden: ReadonlySet<string>,
+  grouped: ReadonlySet<string>,
+): StepToolSetLike {
+  return {
+    dispose: () => set.dispose(),
+    view: (scope?: unknown) => projectStepView(set.view(scope), hidden, grouped),
+  };
+}
+
+/**
+ * Project one step view: drop hidden names, keep grouped names reachable by key.
+ *
+ * DSH reads the model-facing declarations by iterating this map and resolves a
+ * dispatch with `get(name)`. A grouped tool therefore disappears from the
+ * declaration list while staying directly callable — the same split the group
+ * mode needs, minus the on-demand switch.
+ */
+function projectStepView(
+  view: ReadonlyMap<string, unknown>,
+  hidden: ReadonlySet<string>,
+  grouped: ReadonlySet<string>,
+): ReadonlyMap<string, unknown> {
+  const declared = new Map<string, unknown>();
+  for (const [name, definition] of view) {
+    if (hidden.has(name) || grouped.has(name)) continue;
+    declared.set(name, definition);
+  }
+  return new ReachableView(declared, view, hidden);
+}
+
+/**
+ * Declarations plus reachable-but-undeclared definitions.
+ *
+ * Iteration and `size` describe what the model may see; `get`, `has` and the
+ * registry lookup also answer for a name that a group currently stands in for.
+ */
+class ReachableView implements ReadonlyMap<string, unknown> {
+  constructor(
+    private readonly declared: Map<string, unknown>,
+    private readonly all: ReadonlyMap<string, unknown>,
+    private readonly hidden: ReadonlySet<string>,
+  ) {}
+
+  get size(): number { return this.declared.size; }
+  get [Symbol.toStringTag](): string { return "ReachableView"; }
+
+  get(name: string): unknown {
+    if (this.hidden.has(name)) return undefined;
+    return this.declared.get(name) ?? this.all.get(name);
+  }
+
+  has(name: string): boolean {
+    if (this.hidden.has(name)) return false;
+    return this.declared.has(name) || this.all.has(name);
+  }
+
+  keys(): MapIterator<string> { return this.declared.keys(); }
+  values(): MapIterator<unknown> { return this.declared.values(); }
+  entries(): MapIterator<[string, unknown]> { return this.declared.entries(); }
+  forEach(callback: (value: unknown, key: string, map: ReadonlyMap<string, unknown>) => void): void {
+    for (const [key, value] of this.declared) callback(value, key, this);
+  }
+  [Symbol.iterator](): MapIterator<[string, unknown]> { return this.declared.entries(); }
+}
+
 function filterStepToolSet(set: StepToolSetLike, hidden: ReadonlySet<string>): StepToolSetLike {
   return {
     dispose: () => set.dispose(),
