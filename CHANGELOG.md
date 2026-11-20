@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- 修复「折叠工具后，按族名注册的 `tool:*` 提示词段仍然留在系统提示词里」（issue #4）。`dsh-tool-jobs` 的 `tool:jobs`、`dsh-tool-goal` 的 `tool:goal`、`dsh-tool-session-query` 的 `tool:session-query`、`dsh-tool-terminal` 的 `tool:pty`、`dsh-terminal-panel` 的 `tool:pty-panel`、`dsh-tool-schedule` 的 `tool:schedule` 都以能力族而不是单个工具命名，而旧实现把 `tool:` 后面的整段当成工具名，于是 `owners=["jobs"]` 永远匹配不到任何隐藏工具，模型仍会读到「可以调用 `job_output` / `session_search` / `create_goal`」的指令，真正调用却被 guard 拒绝。现在包装 `systemPrompt.section()` 与 `tools.register()`，按**注册该段落的 plugin entry / fiber** 收集它注册的工具，作为该段落的工具族；族内全部被隐藏或折叠时删除段落，任一可见则保留。DSH 的默认 `preset-standard` 属于 web-app bundle，可能在 profile bundle 应用前就完成注册，也可能由 `DefaultPresetMount` 在本插件启动后才组合出来；因此启动时先从仍存活的 Cordis fiber registry 恢复历史注册，并在每次提示词组装发现 `systemPrompt` / `tools` 层的名字集合变化时按当前层再懒恢复一次：读取每个 plugin entry 的 callback 及其委托模块函数中的 section / `defineTool` 声明，再按 `fiber.getEffects()` 记录的 section/register 顺序精确配对，解决「明明是新启动的会话，`tool:jobs` / `tool:goal` 段落仍然存在」的启动顺序问题。该恢复不读取 section 正文、不做词干/前后缀/标签猜测，也不维护任何「包名 → 工具列表」的硬编码表；`tool:pty-panel` 这类 section 与工具分属不同 helper 的插件按模块函数声明配对。无法从声明恢复时保持旧行为（不误删）。issue #3 的「子代理 baseline 被上游 `restrict()` 裁空、按 Preset 策略判定折叠」路径保持不变。
+
 ## [1.2.13] - 2026-11-10
 
 ### Fixed

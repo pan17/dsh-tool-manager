@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { ToolPolicyRuntime } from "../dist/runtime.js";
+import { PromptToolAffinity, resetPromptAffinity } from "../dist/prompt-affinity.js";
 import { TOOL_MANAGER_PROBE_SESSION_ID } from "../dist/types.js";
 
 function resumedSession() {
@@ -1058,6 +1059,345 @@ describe("a tool registered after the baseline snapshot", () => {
     assert.deepEqual(h.restricted, ["github_search"], "the closed group stays denied");
     assert.deepEqual(h.visibleNames(), ["read", "gitlab_search"]);
     assert.deepEqual(decision.messages[0].source.entries[0].tools, ["github_search"]);
+    await runtime.dispose();
+  });
+});
+
+describe("family-named prompt sections", () => {
+  class FakeSystemPrompt {
+    constructor() { this.sections = []; }
+    section(section) { this.sections.push(section.name); return () => {}; }
+  }
+
+  class FakeTools {
+    constructor() { this.definitions = []; this.discovery = undefined; }
+    schemas() { return []; }
+    register(definition) {
+      this.definitions.push(definition.name);
+      if (definition.name === "tool_list") this.discovery = definition;
+      return () => {};
+    }
+    restrict() { return () => {}; }
+  }
+
+  /** A service shadow whose `this.ctx` is the plugin context that owns the call. */
+  function asPlugin(service, fiber) {
+    const shadow = Object.create(service);
+    shadow.ctx = { fiber };
+    return shadow;
+  }
+
+  function makeHost(names) {
+    const schema = (name) => ({ name, description: name, parameters: {} });
+    const systemPrompt = new FakeSystemPrompt();
+    const hostTools = new FakeTools();
+    const listeners = new Map();
+    const agents = [];
+    let assemble;
+    const scopedTools = {
+      schemas() { return names.map(schema); },
+      register() { throw new Error("scope register should not be used"); },
+      restrict() { return () => {}; },
+      guard() { return () => {}; },
+    };
+    const agent = {
+      id: "session-1",
+      ctx: {
+        get(name) { return name === "tools" ? scopedTools : undefined; },
+        on(name, handler) {
+          if (name === "system-prompt/assemble") assemble = handler;
+          return () => {};
+        },
+      },
+      session: resumedSession(),
+    };
+    const context = {
+      get(name) {
+        if (name === "tools") return hostTools;
+        if (name === "systemPrompt") return systemPrompt;
+        if (name === "agents") return { list: () => agents };
+        if (name === "logger") return { warn() {} };
+        return undefined;
+      },
+      on(event, listener) {
+        listeners.set(event, [...(listeners.get(event) ?? []), listener]);
+        return () => {};
+      },
+    };
+    return {
+      systemPrompt,
+      hostTools,
+      context,
+      agent,
+      agents,
+      names,
+      emit(event, payload) { for (const listener of listeners.get(event) ?? []) listener(payload); },
+      filter() { return assemble; },
+    };
+  }
+
+  const settings = {
+    presets: {
+      standard: {
+        disabled: [],
+        groups: [{ name: "Jobs", patterns: ["job_list", "job_output", "job_kill"] }],
+      },
+    },
+  };
+
+  it("drops a family-named section registered before the manager started", async () => {
+    // DSH's preset-standard row mounts before the profile's tool-manager
+    // bundle applies, so this section exists before affinity.install() runs.
+    resetPromptAffinity();
+    const h = makeHost(["tool_list", "read", "job_list", "job_output", "job_kill"]);
+    asPlugin(h.systemPrompt, { name: "dsh-tool-jobs" }).section({
+      name: "tool:jobs",
+      text: "Track every background job id you start. Use job_output or job_kill when done.",
+    });
+    h.systemPrompt.layers = {
+      global: { sections: new Map([["tool:jobs", {}], ["tool:read", {}]]) },
+      scoped: new Map(),
+    };
+    h.hostTools.layers = {
+      global: { tools: new Map(["tool_list", "read", "job_list", "job_output", "job_kill"].map((name) => [name, {}])) },
+      scoped: new Map(),
+    };
+    const jobsFiber = {
+      runtime: {
+        callback: new Function("ctx", `
+          ctx.systemPrompt.section({ name: "tool:jobs", text: "" });
+          const list = defineTool({ name: "job_list" });
+          const output = defineTool({ name: "job_output" });
+          const kill = defineTool({ name: "job_kill" });
+        `),
+      },
+      getEffects: () => [
+        { label: "systemPrompt.section()" },
+        { label: "tools.register()" },
+        { label: "tools.register()" },
+        { label: "tools.register()" },
+      ],
+    };
+    h.context.registry = new Map([["runtime", { fibers: [jobsFiber] }]]);
+
+    const runtime = new ToolPolicyRuntime(
+      h.context,
+      { composedPreset: () => "standard" },
+      settings,
+      undefined,
+      undefined,
+      new PromptToolAffinity(),
+    );
+    runtime.start();
+    h.agents.push(h.agent);
+    h.emit("agent/created", { agent: h.agent });
+
+    const sections = (await h.filter()({}, {}, async () => ({
+      sections: [
+        { name: "tool:jobs", text: "Track every background job id you start. Use job_output or job_kill when done." },
+        { name: "tool:read", text: "Read a file." },
+        { name: "identity", text: "You are an AI agent." },
+      ],
+      contexts: [],
+      variables: {},
+    }))).sections.map((section) => section.name);
+
+    assert.deepEqual(sections, ["tool:read", "identity"]);
+    await runtime.dispose();
+  });
+
+  it("drops a family-named section when the registering plugin's whole family is folded", async () => {
+    resetPromptAffinity();
+    const h = makeHost(["tool_list", "read"]);
+    const runtime = new ToolPolicyRuntime(
+      h.context,
+      { composedPreset: () => "standard" },
+      settings,
+      undefined,
+      undefined,
+      new PromptToolAffinity(),
+    );
+    runtime.start();
+
+    // The preset mounts after the manager starts: `dsh-tool-jobs` registers its
+    // section and its three tools in the same plugin fiber, as the real package does.
+    const jobsFiber = { name: "dsh-tool-jobs" };
+    asPlugin(h.systemPrompt, jobsFiber).section({
+      name: "tool:jobs",
+      text: "Track every background job id you start. Use job_output or job_kill when done.",
+    });
+    for (const name of ["job_list", "job_output", "job_kill"]) {
+      asPlugin(h.hostTools, jobsFiber).register({ name });
+    }
+    h.names.push("job_list", "job_output", "job_kill");
+
+    h.agents.push(h.agent);
+    h.emit("agent/created", { agent: h.agent });
+
+    const kept = async () => (await h.filter()({}, {}, async () => ({
+      sections: [
+        { name: "tool:jobs", text: "Track every background job id you start. Use job_output or job_kill when done." },
+        { name: "tool:read", text: "Read a file." },
+        { name: "identity", text: "You are an AI agent." },
+      ],
+      contexts: [],
+      variables: {},
+    }))).sections.map((section) => section.name);
+
+    assert.deepEqual(await kept(), ["tool:read", "identity"]);
+
+    // Opening the group makes the family callable again, so the section returns.
+    await h.hostTools.discovery.execute({ group: "Jobs" }, { agent: h.agent });
+    assert.deepEqual(await kept(), ["tool:jobs", "tool:read", "identity"]);
+    await runtime.dispose();
+  });
+
+  it("drops a family section even when its prose mentions another plugin's tool", async () => {
+    resetPromptAffinity();
+    const h = makeHost(["tool_list", "read", "terminal_open", "terminal_close"]);
+    const runtime = new ToolPolicyRuntime(
+      h.context,
+      { composedPreset: () => "standard" },
+      {
+        presets: {
+          standard: {
+            disabled: [],
+            groups: [{ name: "User terminals", patterns: ["user_terminal_list", "user_terminal_read"] }],
+          },
+        },
+      },
+      undefined,
+      undefined,
+      new PromptToolAffinity(),
+    );
+    runtime.start();
+
+    const panelFiber = { name: "dsh-terminal-panel" };
+    asPlugin(h.systemPrompt, panelFiber).section({
+      name: "tool:pty-panel",
+      text: "Terminals you open with terminal_open appear in the side panel; terminal_close only removes one.",
+    });
+    for (const name of ["user_terminal_list", "user_terminal_read"]) {
+      asPlugin(h.hostTools, panelFiber).register({ name });
+    }
+    h.names.push("user_terminal_list", "user_terminal_read");
+
+    h.agents.push(h.agent);
+    h.emit("agent/created", { agent: h.agent });
+
+    const sections = (await h.filter()({}, {}, async () => ({
+      sections: [
+        {
+          name: "tool:pty-panel",
+          text: "Terminals you open with terminal_open appear in the side panel; terminal_close only removes one.",
+        },
+        { name: "tool:read", text: "Read a file." },
+      ],
+      contexts: [],
+      variables: {},
+    }))).sections.map((section) => section.name);
+
+    // Ownership is the panel entry's own user_terminal_* tools; mentions of
+    // terminal_open/terminal_close in prose do not make them members.
+    assert.deepEqual(sections, ["tool:read"]);
+    await runtime.dispose();
+  });
+
+  it("drops a family section that only mentions generic tool words", async () => {
+    resetPromptAffinity();
+    const h = makeHost(["tool_list", "read", "terminal_open", "terminal_send", "terminal_close"]);
+    const runtime = new ToolPolicyRuntime(
+      h.context,
+      { composedPreset: () => "standard" },
+      {
+        presets: {
+          standard: {
+            disabled: [],
+            groups: [{ name: "Terminals", patterns: ["terminal_*"] }],
+          },
+        },
+      },
+      undefined,
+      undefined,
+      new PromptToolAffinity(),
+    );
+    runtime.start();
+
+    const terminalFiber = { name: "dsh-tool-terminal" };
+    asPlugin(h.systemPrompt, terminalFiber).section({
+      name: "tool:pty",
+      text: "Use a terminal session only when work needs persistent terminal state or interactive stdin; prefer shell/read/write/edit for bounded one-shot operations.",
+    });
+    for (const name of ["terminal_open", "terminal_send", "terminal_close"]) {
+      asPlugin(h.hostTools, terminalFiber).register({ name });
+    }
+
+    h.agents.push(h.agent);
+    h.emit("agent/created", { agent: h.agent });
+
+    const sections = (await h.filter()({}, {}, async () => ({
+      sections: [
+        {
+          name: "tool:pty",
+          text: "Use a terminal session only when work needs persistent terminal state or interactive stdin; prefer shell/read/write/edit for bounded one-shot operations.",
+        },
+        { name: "tool:read", text: "Read a file." },
+      ],
+      contexts: [],
+      variables: {},
+    }))).sections.map((section) => section.name);
+
+    // The text says `shell/read/write/edit`, but those single-word tools are not
+    // separator-bearing names: only the registration-identity family can prove
+    // this section stale.
+    assert.deepEqual(sections, ["tool:read"]);
+    await runtime.dispose();
+  });
+
+  it("folds a family section from the preset policy when the baseline is narrowed", async () => {
+    // Issue #3 path: a delegated child Agent starts without the plugin's tools
+    // in its baseline, but the preset still declares the folded group.
+    resetPromptAffinity();
+    const h = makeHost(["tool_list", "read"]);
+    const runtime = new ToolPolicyRuntime(
+      h.context,
+      { composedPreset: () => "standard" },
+      {
+        presets: {
+          standard: {
+            disabled: [],
+            groups: [{ name: "Jobs", patterns: ["job_*"] }],
+          },
+        },
+      },
+      undefined,
+      undefined,
+      new PromptToolAffinity(),
+    );
+    runtime.start();
+
+    const jobsFiber = { name: "dsh-tool-jobs" };
+    asPlugin(h.systemPrompt, jobsFiber).section({
+      name: "tool:jobs",
+      text: "Track every background job id you start.",
+    });
+    for (const name of ["job_list", "job_output", "job_kill"]) {
+      asPlugin(h.hostTools, jobsFiber).register({ name });
+    }
+
+    h.agents.push(h.agent);
+    h.emit("agent/created", { agent: h.agent });
+
+    const sections = (await h.filter()({}, {}, async () => ({
+      sections: [
+        { name: "tool:jobs", text: "Track every background job id you start." },
+        { name: "tool:read", text: "Read a file." },
+      ],
+      contexts: [],
+      variables: {},
+    }))).sections.map((section) => section.name);
+
+    assert.deepEqual(sections, ["tool:read"]);
     await runtime.dispose();
   });
 });

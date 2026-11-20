@@ -56,17 +56,24 @@ mcp__<serverName>__<rawToolName>
 
 提示词里不只有工具声明：`@deepseek-ai/dsh-mcp-resources` 会注册 `mcp-resource-servers` 段（列出资源服务器名，并让模型用三个共享资源工具），`@deepseek-ai/dsh-mcp-client` 会为每个服务器注册 `mcp:<server>` 段（服务器自带 instructions）。这些段落只在对应工具可用时才有意义；工具全部收进未打开的按需组或被关闭后，段落会诱导模型调用已经不存在的工具。
 
-DSH 的 section 注册只有 `name` / `order` / `text` / `interpolate`，没有“本段介绍哪些工具”的元数据，因此按命名约定归属（`src/runtime.ts` 的 `sectionToolOwners()`）：
+DSH 的 section 注册只有 `name` / `order` / `text` / `interpolate`，没有“本段介绍哪些工具”的元数据；`ToolDefinition` 也没有 owner/source 字段。因此归属从**注册身份**读取（`src/prompt-affinity.ts`）：Cordis 的服务方法按调用方 context 绑定（`this.ctx` 就是调用方），包装 `SystemPrompt.prototype.section()` 与 `ToolsService.prototype.register()` 就能记下「这个段落由哪个插件 fiber 注册」「这个工具由哪个插件 fiber 注册」。官方工具包（`dsh-tool-jobs`、`dsh-tool-goal`、`dsh-tool-session-query`、`dsh-tool-terminal`、`dsh-terminal-panel`、`dsh-tool-schedule`）都在同一个 plugin entry（含它委托的模块函数）里注册 section 和工具，因此「同一 entry 声明并注册的工具」就是该段落的精确工具族，**不维护任何包名→工具名表**。
 
-- `tool:<name>`：DSH 为单个工具生成的说明段；
-- `mcp:<server>`：该服务器注册的全部 `mcp__<server>__*` 工具；
-- `mcp-resource-servers`：`list_mcp_resources` / `list_mcp_resource_templates` / `read_mcp_resource` 三个共享工具。
+但 DSH 的默认 `preset-standard`（以及 web-app 层的其他 preset 定义）属于 web-app bundle：它可能在 profile bundle 里的 `dsh-tool-manager` 应用之前就已经把 section 和工具注册完，也可能由 `DefaultPresetMount` 在插件启动之后才组合出来，启动时 `systemPrompt.layers` / `tools.layers` 还可能是空的。此时不能把「层里暂时没有」当成「段落不存在」。因此 `src/prompt-affinity.ts` 从**仍然存活的 Cordis fiber registry** 恢复注册：每个 fiber 保留 plugin callback，`fiber.getEffects()` 记录该 fiber 调用 `systemPrompt.section()` / `tools.register()` 的精确顺序；解析 callback（以及 callback 委托的模块函数）里的 `name: "tool:..."` 声明和 `defineTool({ name: "..." })` 声明，按相同顺序配对，就得到每个 section 的真实工具集合。启动时先恢复一次；之后每次提示词组装调用 `lookup()` 时若发现 `systemPrompt` / `tools` 层的名字集合变化（例如默认 Preset 刚挂载），会按当前层再懒恢复一次。整个过程不读 section 的 `text`，不做词干、前后缀或标签猜测；找不到声明时保持旧行为，绝不猜测。
 
-只有「该族全部工具都被隐藏」时才删除段落；族内还有任一工具可见就保留（例如只关闭一个 MCP 工具时，服务器说明仍然有效）。不属于任何工具族的段落、以及族内没有注册任何工具的段落一律保留，避免误删 persona、计划策略这类正文。
+归属按以下顺序解析：
 
-归属与判据都不依赖 baseline 是否包含该工具（issue #3）：`denyNames()` 只能拒绝**已存在**的名字，因为 `restrict()` 会拒绝未知工具；而子代理在 tool-manager install 之前就被 `childCtx.tools.restrict(toolFilter)` 裁过一次工具面，baseline 里可能一个成员都没有。因此段落判定额外读 **Preset 策略本身**——`disabled` 命中，或命中某个**未 open** 的组 patterns，就视为折叠，即使该工具不在 baseline。这样「折叠工具 = 折叠其说明段」按声明生效，与委派层裁了多少工具无关。
+- `tool:<工具名>`：`<工具名>` 本身是真实工具（baseline 或策略字面名）时，只覆盖该工具；
+- `tool:<族名>`：`<工具名>` 不是真实工具时，取「注册该 section 的 plugin entry 所声明并注册的全部工具」；该 entry 在观察器安装前或安装后才挂载时，都从 fiber 的 callback/effect 顺序和模块函数声明恢复，不读取 section 文字；
+- `mcp:<server>`：该服务器注册的全部 `mcp__<server>__*` 工具（命名约定不变）；
+- `mcp-resource-servers`：`list_mcp_resources` / `list_mcp_resource_templates` / `read_mcp_resource` 三个共享工具（`dsh-mcp-resources` 的 section 和工具分属不同 child fiber，注册归属不适用，保留常量）。
 
-族的成员从两处取并集：baseline 里实际继承到的名字 + 策略里写明的字面名（`disabled` 与不含 `*` 的 patterns）。若族在 baseline 与策略里都没有具体成员（只被通配符覆盖，例如 `mcp__playwright__*`），则只有当某个未 open 的组的 pattern 以 `mcp__<server>__` 开头时才删除该服务器的 instructions 段。
+只有「该族全部工具都被隐藏」时才删除段落；族内还有任一工具可见就保留（例如只关闭一个 MCP 工具时，服务器说明仍然有效）。不属于任何工具族的段落一律保留，避免误删 persona、计划策略这类正文。
+
+族名家族的成员不按 baseline 过滤（issue #3）：`denyNames()` 只能拒绝**已存在**的名字，因为 `restrict()` 会拒绝未知工具；而子代理在 tool-manager install 之前就被 `childCtx.tools.restrict(toolFilter)` 裁过一次工具面，baseline 里可能一个成员都没有。因此段落判定额外读 **Preset 策略本身**——`disabled` 命中，或命中某个**未 open** 的组 patterns，就视为折叠，即使该工具不在 baseline。这样「折叠工具 = 折叠其说明段」按声明生效，与委派层裁了多少工具无关。
+
+归属只认该 section 所属 plugin entry 自己声明并注册的工具，不把正文里提到的其他插件工具算进来。例如 `tool:pty-panel` 的正文可能提到 `terminal_open`/`terminal_close`，但它们属于 `dsh-tool-terminal`，不会改变 `tool:pty-panel` 归 `dsh-terminal-panel` 的 `user_terminal_*` 工具这一事实；`user_terminal_*` 全隐藏时段落照常删除，避免用正文猜测把失效说明留下。
+
+若某 `tool:<族名>` 的 callback/模块声明无法恢复（例如插件动态拼接 section 名或工具名），该段回退到旧行为（按 label 自身判定），不会误删。恢复只会记录同一 plugin entry 的显式声明；任何成员可见都会保留，因此最坏情况是多留一段，不会删掉仍有效的说明。包装器只观察、不改写调用语义，且按原型各装一次；观察结果放在 `globalThis`（与 §2.6 的跨重载内存同一原则），插件重载不丢。
 
 ### 2.3 每个模型 step 都重新组装工具目录
 

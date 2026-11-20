@@ -31,7 +31,7 @@ import {
 } from "./suggest.js";
 
 export const name = "dsh-tool-manager";
-export const inject = ["agentPresets", "agents", "tools"];
+export const inject = ["agentPresets", "agents", "tools", "systemPrompt"];
 
 interface HttpRequest extends NodeJS.ReadableStream {
   method?: string;

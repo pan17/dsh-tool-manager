@@ -16,6 +16,7 @@ import {
 import { restoredExposureNames } from "./exposure-history.js";
 import { PresetBindingRepair, type RepairAgentDiagnostics, type RepairDiagnostics } from "./preset-repair.js";
 import type { UserNoticeInput } from "./notices.js";
+import { PromptToolAffinity } from "./prompt-affinity.js";
 import {
   denyNames,
   findGroup,
@@ -98,12 +99,25 @@ export class ToolPolicyRuntime {
     private readonly onUserNotice?: (notice: UserNoticeInput) => void,
     /** Called when a repair succeeds, so its transient notice can be withdrawn. */
     private readonly onBindingHealed?: (sessionId: string | undefined, presetId: string | undefined) => void,
+    /**
+     * Registration-identity view of prompt sections and their tool families.
+     * Defaults to the process-wide instance so a plugin reload keeps what was
+     * learned before it. Tests pass a fresh instance with a reset store.
+     */
+    private readonly affinity: PromptToolAffinity = PromptToolAffinity.shared(),
   ) {
     this.settings = initial;
     this.repairs = new PresetBindingRepair({ warn: (message) => this.warn(message) });
   }
 
   start(): void {
+    // Observe future section/tool registrations, and recover exact ownership
+    // for the preset sections already mounted before this profile plugin.
+    this.affinity.install(
+      this.ctx.get("systemPrompt"),
+      this.ctx.get("tools"),
+      (this.ctx as ContextLike & { registry?: unknown }).registry,
+    );
     this.registerDiscovery();
     this.installStepFilter();
     const agents = this.ctx.get<{ list(): AgentLike[] }>("agents");
@@ -306,7 +320,14 @@ export class ToolPolicyRuntime {
         this.warnUnrestrictable();
       }
       const sections = assembly.sections.filter((section) => (
-        !sectionHidden(section.name, state.baseline, policy, folded, hidden)
+        !sectionHidden(
+          section as PromptSectionLike,
+          state.baseline,
+          policy,
+          folded,
+          hidden,
+          this.affinity,
+        )
       ));
       const filtered: PromptPresentationLike = { ...assembly, sections };
       if (Array.isArray(assembly.tools)) {
@@ -909,16 +930,30 @@ const MCP_RESOURCE_TOOLS = [
   "read_mcp_resource",
 ] as const;
 
+/** One assembled prompt section, identified by its registry name. */
+interface PromptSectionLike {
+  name: string;
+  [key: string]: unknown;
+}
+
+/** The tool family a prompt section belongs to. */
+interface SectionOwnership {
+  readonly names: readonly string[];
+}
+
 /**
  * Whether a prompt section exists only to advertise tools that are all hidden.
  *
  * A section that only advertises tools is dead weight once every one of them is
  * hidden: the model reads an instruction it cannot follow, because the
- * declaration and the call are both gone. DSH links `tool:<name>` sections to
- * exactly one tool; other producers encode the family in the section name, and
- * this resolver extends the same rule by convention instead of hard-coding one
- * group or one server:
- * - `tool:<name>` — DSH's per-tool description section;
+ * declaration and the call are both gone. DSH prompt sections carry no
+ * "this section describes these tools" metadata, so ownership comes from:
+ * - `tool:<tool>` — a section named after the one tool it introduces;
+ * - `tool:<family>` — a section whose name is a capability family
+ *   (`tool:jobs`, `tool:goal`, `tool:pty`, …). Its members are the tools
+ *   declared and registered by the same plugin entry; sections mounted before
+ *   this plugin started recover that ownership from the entry's live Cordis
+ *   fiber callbacks and module declarations, not from prompt prose;
  * - `mcp:<server>` — `@deepseek-ai/dsh-mcp-client` instructions for one server,
  *   covering every `mcp__<server>__*` tool it registered;
  * - `mcp-resource-servers` — `@deepseek-ai/dsh-mcp-resources` hint for the
@@ -929,59 +964,77 @@ const MCP_RESOURCE_TOOLS = [
  * `tools.restrict()`, so its baseline may not name a single member of a folded
  * group even though the section is still emitted globally (issue #3).
  *
- * @param name - prompt section name.
+ * @param section - assembled prompt section (identified by name).
  * @param baseline - every tool name this Agent inherited.
  * @param policy - the preset policy for this Agent.
  * @param folded - the policy's groups that are not open in this session.
  * @param hidden - names already denied by `denyNames()` for this Agent.
+ * @param affinity - plugin-declaration lookup for family-named sections.
  * @returns whether the section must be dropped from the prompt.
  */
 function sectionHidden(
-  name: string,
+  section: PromptSectionLike,
   baseline: readonly string[],
   policy: PresetToolPolicy,
   folded: readonly PresetToolPolicy["groups"][number][],
   hidden: ReadonlySet<string>,
+  affinity?: PromptToolAffinity,
 ): boolean {
-  const owners = sectionToolOwners(name, baseline, policy);
+  const owners = sectionToolOwners(section, baseline, policy, affinity);
   // Not a tool section: persona, plan policy, delegation rules, and every other
   // prose contribution is never filtered by this plugin.
   if (owners === undefined) return false;
-  if (owners.length === 0) {
+  if (owners.names.length === 0) {
     // A namespace section whose tools this Agent never inherited. Only a folded
     // pattern that spells out this very namespace proves it stale.
-    const prefix = mcpServerPrefix(name);
+    const prefix = mcpServerPrefix(section.name);
     return prefix !== undefined && folded.some((group) => (
       group.patterns.some((pattern) => pattern.startsWith(prefix) && pattern.length > prefix.length)
     ));
   }
-  return owners.every((tool) => hidden.has(tool) || policyHides(policy, folded, tool));
+  if (!owners.names.every((tool) => hidden.has(tool) || policyHides(policy, folded, tool))) return false;
+  return true;
 }
 
 /**
  * The tools a prompt section exists to introduce.
  *
- * @param name - prompt section name.
+ * @param section - assembled prompt section (identified by name).
  * @param registeredNames - every tool name in the Agent's baseline.
  * @param policy - the preset policy, whose literal names count as members.
+ * @param affinity - plugin-declaration lookup for `tool:<family>` sections.
  * @returns the owned tool names (possibly empty when the family is known only
  *   by a wildcard pattern), or `undefined` when the section is not owned by a
  *   tool family and must always be kept.
  */
 function sectionToolOwners(
-  name: string,
+  section: PromptSectionLike,
   registeredNames: readonly string[],
   policy: PresetToolPolicy,
-): readonly string[] | undefined {
-  if (name.startsWith("tool:")) return [name.slice("tool:".length)];
-  if (name === "mcp-resource-servers") return MCP_RESOURCE_TOOLS;
+  affinity?: PromptToolAffinity,
+): SectionOwnership | undefined {
+  const name = section.name;
+  if (name === "mcp-resource-servers") return { names: MCP_RESOURCE_TOOLS };
   const prefix = mcpServerPrefix(name);
-  if (prefix === undefined) return undefined;
-  const members = new Set(registeredNames.filter((tool) => tool.startsWith(prefix)));
-  for (const declared of declaredToolNames(policy)) {
-    if (declared.startsWith(prefix)) members.add(declared);
+  if (prefix !== undefined) {
+    const members = new Set(registeredNames.filter((tool) => tool.startsWith(prefix)));
+    for (const declared of declaredToolNames(policy)) {
+      if (declared.startsWith(prefix)) members.add(declared);
+    }
+    return { names: [...members] };
   }
-  return [...members];
+  if (!name.startsWith("tool:")) return undefined;
+  const label = name.slice("tool:".length);
+  const known = new Set([...registeredNames, ...declaredToolNames(policy)]);
+  // A real tool name always wins: `tool:<tool>` describes exactly that tool.
+  if (known.has(label)) return { names: [label] };
+  const family = affinity?.lookup(name);
+  if (family !== undefined && family.owned && family.tools.length > 0) {
+    return { names: family.tools };
+  }
+  // Unknown family: keep today's behavior, where the policy's own literal and
+  // wildcard declarations still decide whether the label is folded.
+  return { names: [label] };
 }
 
 /** The `mcp__<server>__` tool-name prefix an `mcp:<server>` section covers. */
@@ -1036,4 +1089,3 @@ function policyHides(
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
-
