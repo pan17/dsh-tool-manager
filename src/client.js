@@ -36,7 +36,7 @@ window.__ModuleLoader__.load({
 			".tm_modal_body{padding:0 16px 12px;display:flex;flex-direction:column;gap:10px;min-height:0;flex:1 1 auto;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}",
 			".tm_modal_foot{padding:12px 16px 16px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.18));flex:0 0 auto}.tm_confirm_card{width:min(460px,100%)}.tm_timeout_field{display:flex;align-items:center;gap:8px}.tm_timeout_field .tm_input{max-width:120px;flex:0 0 120px}.tm_preview_body{padding-right:10px}.tm_preview_panel{flex:0 0 auto;overflow:visible}.tm_preview_meta{min-width:0;flex:1}.tm_preview_desc{margin-top:4px;white-space:normal;overflow-wrap:anywhere;word-break:break-word;color:var(--dsw-alias-label-secondary,#9097a4);font-size:12px;line-height:1.55}",
 			".tm_picker{min-height:180px;max-height:min(46vh,420px);overflow:auto;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.18));border-radius:8px;background:var(--dsw-alias-bg-layer-1,rgba(128,128,128,.06))}",
-			".tm_pick{display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.1))}.tm_pick:last-child{border-bottom:0}",
+			".tm_pick{display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.1))}.tm_pick:last-child{border-bottom:0}.tm_copy_meta{font-size:11px;color:var(--dsw-alias-label-secondary,#9097a4);line-height:1.45;margin-top:3px;overflow-wrap:anywhere}",
 			".tm_banner{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:10001;display:flex;align-items:flex-start;gap:14px;width:min(720px,calc(100vw - 32px));padding:12px 14px;border:1px solid #b45309;border-radius:12px;background:color-mix(in srgb,#f59e0b 18%,var(--dsw-alias-bg-base,#17191d));box-shadow:0 16px 48px rgba(0,0,0,.42);font-size:12px;line-height:1.55;color:var(--dsw-alias-label-primary,#e7e9ed)}",
 			".tm_banner_body{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}.tm_banner_line{overflow-wrap:anywhere}",
 		].join("");
@@ -92,6 +92,45 @@ window.__ModuleLoader__.load({
 					patterns: [...(group.patterns || [])],
 				})),
 			};
+		}
+		/**
+		 * Project one Preset's whole policy onto another Preset.
+		 *
+		 * The target is meant to be overwritten, so its current groups and
+		 * disabled names are ignored. Copy only what the target can actually
+		 * expose: group membership is limited to tools present in both
+		 * Presets, and a group whose members all disappear is skipped instead
+		 * of becoming an invalid empty group. Old wildcard patterns are
+		 * expanded to exact names, matching what the group editor shows.
+		 */
+		function copyPresetPolicy(sourcePreset, targetPreset) {
+			const sourceTools = sourcePreset.tools || [];
+			const sourcePolicy = sourcePreset.policy || { disabled: [], groups: [] };
+			const targetNames = new Set((targetPreset.tools || []).map((tool) => tool.name));
+			const sourceNames = new Set(sourceTools.map((tool) => tool.name));
+			const disabled = (sourcePolicy.disabled || [])
+				.filter((name) => sourceNames.has(name) && targetNames.has(name));
+			const claimed = new Set(disabled);
+			const groups = [];
+			const skippedGroups = [];
+			for (const group of sourcePolicy.groups || []) {
+				const members = [];
+				for (const tool of matchingTools(sourceTools, group.patterns || [])) {
+					if (!targetNames.has(tool.name) || claimed.has(tool.name)) continue;
+					claimed.add(tool.name);
+					members.push(tool.name);
+				}
+				if (members.length === 0) {
+					skippedGroups.push(group.name || "未命名分组");
+					continue;
+				}
+				groups.push({
+					name: group.name,
+					...(group.description ? { description: group.description } : {}),
+					patterns: members,
+				});
+			}
+			return { disabled, groups, skippedGroups };
 		}
 		function settingsPayload(value) {
 			const settings = { presets: {} };
@@ -259,6 +298,7 @@ window.__ModuleLoader__.load({
 			const [autoGrouping, setAutoGrouping] = react.useState(false);
 			const [autoGroupError, setAutoGroupError] = react.useState("");
 			const [autoPreview, setAutoPreview] = react.useState(null);
+			const [copyDialog, setCopyDialog] = react.useState(null);
 			const [expanded, setExpanded] = react.useState({});
 			const [aiConfirm, setAiConfirm] = react.useState(null);
 			const [suggestionTimeoutSeconds, setSuggestionTimeoutSeconds] = react.useState("60");
@@ -269,7 +309,7 @@ window.__ModuleLoader__.load({
 				setBusy(true); setError("");
 				return api("/snapshot").then((value) => {
 					const next = withGroupKeys(value);
-					setSnapshot(value); setDraft(next); setModal(null); setAutoPreview(null); setAutoGroupError("");
+					setSnapshot(value); setDraft(next); setModal(null); setAutoPreview(null); setCopyDialog(null); setAutoGroupError("");
 					setActive((current) => current && value.presets.some((p) => p.id === current) ? current : (value.presets[0] && value.presets[0].id) || "");
 				}).catch((e) => {
 					// The Host swaps the preset registry instance when its node
@@ -294,17 +334,18 @@ window.__ModuleLoader__.load({
 				return () => window.removeEventListener("beforeunload", onBeforeUnload);
 			}, [dirty]);
 			react.useEffect(() => {
-				if (!modal && !aiConfirm && !autoPreview) return undefined;
+				if (!modal && !aiConfirm && !autoPreview && !copyDialog) return undefined;
 				function onKeyDown(event) {
 					if (event.key === "Escape") {
 						if (aiConfirm) setAiConfirm(null);
 						else if (autoPreview) setAutoPreview(null);
+						else if (copyDialog) setCopyDialog(null);
 						else if (modal) setModal(null);
 					}
 				}
 				window.addEventListener("keydown", onKeyDown);
 				return () => window.removeEventListener("keydown", onKeyDown);
-			}, [modal, aiConfirm, autoPreview]);
+			}, [modal, aiConfirm, autoPreview, copyDialog]);
 
 			if (!draft) return h("div", { className: "tm_root" }, error ? h("div", { className: "tm_error" }, error) : h("div", { className: "tm_muted" }, "正在读取工具目录…"));
 			const preset = draft.presets.find((item) => item.id === active) || draft.presets[0];
@@ -339,6 +380,82 @@ window.__ModuleLoader__.load({
 					generating: false,
 					generateError: "",
 				});
+			}
+
+			function resetPresetConfig() {
+				if (!hasPresetConfig) return;
+				if (!window.confirm("确定重置当前 Preset 的配置吗？这会清空它的全部按需组和已关闭工具；只修改页面草稿，保存后生效。")) return;
+				mutatePreset((target) => {
+					target.policy = { disabled: [], groups: [] };
+				});
+				setQuery("");
+				setFilter("all");
+				setExpanded({});
+				setMessage("已重置当前 Preset 的配置（草稿）；点击保存后生效。");
+			}
+
+			function openCopyDialog() {
+				if (!hasPresetConfig || copyTargetCount === 0) return;
+				setCopyDialog({ sourceId: preset.id, selected: [] });
+			}
+
+			function toggleCopyTarget(id) {
+				setCopyDialog((current) => {
+					if (!current) return current;
+					const selected = new Set(current.selected || []);
+					if (selected.has(id)) selected.delete(id); else selected.add(id);
+					return { ...current, selected: [...selected] };
+				});
+			}
+
+			function selectAllCopyTargets(ids) {
+				setCopyDialog((current) => current ? { ...current, selected: [...ids] } : current);
+			}
+
+			function clearCopyTargets() {
+				setCopyDialog((current) => current ? { ...current, selected: [] } : current);
+			}
+
+			function confirmCopy() {
+				if (!copyDialog) return;
+				const source = draft.presets.find((item) => item.id === copyDialog.sourceId);
+				if (!source) { setCopyDialog(null); return; }
+				const selected = new Set(copyDialog.selected || []);
+				const plans = [];
+				for (const target of draft.presets) {
+					if (target.id === source.id || !selected.has(target.id) || target.broken) continue;
+					const copied = copyPresetPolicy(source, target);
+					const before = JSON.stringify(policyPayload(target.policy));
+					const after = JSON.stringify(policyPayload({ disabled: copied.disabled, groups: copied.groups }));
+					plans.push({ targetId: target.id, label: target.name || target.id, copied, changed: before !== after });
+				}
+				if (!plans.length) { setCopyDialog(null); return; }
+				setDraft((current) => {
+					const next = clone(current);
+					for (const plan of plans) {
+						const target = next.presets.find((item) => item.id === plan.targetId);
+						if (!target) continue;
+						target.policy = {
+							disabled: [...plan.copied.disabled],
+							groups: plan.copied.groups.map((group) => ({ ...group, _key: newKey() })),
+						};
+					}
+					return next;
+				});
+				const changed = plans.filter((plan) => plan.changed);
+				const unchanged = plans.length - changed.length;
+				const skipped = plans.flatMap((plan) => plan.copied.skippedGroups.map((name) => plan.label + "：" + name));
+				const parts = [];
+				if (changed.length) {
+					parts.push("已将「" + (source.name || source.id) + "」的配置复制到 "
+						+ changed.map((plan) => "「" + plan.label + "」").join("、") + "（草稿），请检查后保存。");
+				} else {
+					parts.push("所选 Preset 的配置已与当前 Preset 一致，没有产生修改。");
+				}
+				if (unchanged) parts.push(unchanged + " 个 Preset 无变化。");
+				if (skipped.length) parts.push("跳过 " + skipped.length + " 个无可用工具的分组：" + skipped.join("；"));
+				setMessage(parts.join(" "));
+				setCopyDialog(null);
 			}
 
 			function openEdit(group) {
@@ -568,7 +685,7 @@ window.__ModuleLoader__.load({
 				api("/save", { method: "POST", body: JSON.stringify({ expectedRevision: snapshot.revision, settings }) })
 					.then((value) => {
 						const next = withGroupKeys(value);
-						setSnapshot(value); setDraft(next); setModal(null);
+						setSnapshot(value); setDraft(next); setModal(null); setCopyDialog(null);
 						setMessage("已保存；运行中 Agent 将从下一个模型步骤应用新策略。");
 					})
 					.catch((e) => setError(String(e.message || e)))
@@ -579,6 +696,10 @@ window.__ModuleLoader__.load({
 			const grouped = groupedNames(preset);
 			const autoGroupCandidates = (preset.tools || []).filter((tool) => !disabled.has(tool.name) && !grouped.has(tool.name));
 			const stats = catalogStats(preset);
+			const presetPolicy = preset.policy || { disabled: [], groups: [] };
+			const hasPresetConfig = !preset.broken
+				&& ((presetPolicy.groups || []).length > 0 || (presetPolicy.disabled || []).length > 0);
+			const copyTargetCount = draft.presets.filter((item) => item.id !== preset.id && !item.broken).length;
 			const needle = query.trim().toLowerCase();
 			const groups = preset.policy.groups || [];
 			const visibleGroups = groups.filter((group) => {
@@ -616,6 +737,15 @@ window.__ModuleLoader__.load({
 			const aiVisibleSelected = aiVisibleCandidates.filter((tool) => aiSelected.has(tool.name)).map((tool) => tool.name);
 			const aiPromptTrimmed = String(aiConfirm && aiConfirm.prompt || "").trim();
 			const aiCanConfirm = aiPromptTrimmed.length > 0 && (!aiIsAutoGroup || aiSelected.size > 0);
+			const copySource = copyDialog ? draft.presets.find((item) => item.id === copyDialog.sourceId) : null;
+			const copyPreviewRows = copySource
+				? draft.presets
+					.filter((item) => item.id !== copySource.id)
+					.map((target) => ({ target, preview: copyPresetPolicy(copySource, target) }))
+				: [];
+			const copySelectableIds = copyPreviewRows.filter((row) => !row.target.broken).map((row) => row.target.id);
+			const copySelected = new Set(copyDialog ? copyDialog.selected || [] : []);
+			const copySelectedCount = copySelectableIds.filter((id) => copySelected.has(id)).length;
 
 			function updateAutoGroupSelection(nextSelectedNames) {
 				const nextSelected = [...new Set(nextSelectedNames)];
@@ -907,6 +1037,77 @@ window.__ModuleLoader__.load({
 				document.body,
 			) : null;
 
+			const copyDialogNode = copyDialog && copySource && typeof document !== "undefined" ? reactDom.createPortal(
+				h("div", { className: "tm_modal", role: "dialog", "aria-modal": "true", "aria-label": "复制当前 Preset 配置" },
+					h("div", { className: "tm_modal_mask", onMouseDown: () => setCopyDialog(null) }),
+					h("div", { className: "tm_modal_card" },
+						h("div", { className: "tm_modal_head" },
+							h("div", null,
+								h("h3", null, "复制当前 Preset 配置"),
+								h("div", { className: "tm_muted" }, "将当前 Preset 的全部按需组和已关闭工具复制到勾选的 Preset；只改页面草稿，保存后生效。"),
+							),
+							h("button", { className: "tm_btn", onClick: () => setCopyDialog(null) }, "关闭"),
+						),
+						h("div", { className: "tm_modal_body" },
+							h("div", { className: "tm_notice" },
+								"源 Preset「" + (copySource.name || copySource.id) + "」："
+								+ (copySource.policy.groups || []).length + " 个按需组、"
+								+ (copySource.policy.disabled || []).length + " 个已关闭工具。"
+								+ "勾选的目标 Preset 现有分组和关闭项将被整份覆盖。",
+							),
+							h("div", { className: "tm_row" },
+								h("button", {
+									className: "tm_btn",
+									disabled: copySelectableIds.length === 0,
+									onClick: () => selectAllCopyTargets(copySelectableIds),
+								}, "全选可复制项"),
+								h("button", { className: "tm_btn", disabled: copySelectedCount === 0, onClick: clearCopyTargets }, "清空"),
+								h("span", { className: "tm_muted" }, "已选 " + copySelectedCount + " / " + copySelectableIds.length + " 个 Preset"),
+							),
+							copyPreviewRows.length
+								? h("div", { className: "tm_picker" }, copyPreviewRows.map(({ target, preview }) => {
+									const currentGroups = (target.policy.groups || []).length;
+									const currentDisabled = (target.policy.disabled || []).length;
+									const meta = target.broken
+										? "工具目录读取失败，暂不能复制"
+										: "现有 " + currentGroups + " 个组 / " + currentDisabled + " 个关闭项 → 将复制 "
+											+ preview.groups.length + " 个组 / " + preview.disabled.length + " 个关闭项"
+											+ (preview.skippedGroups.length
+												? "；跳过 " + preview.skippedGroups.length + " 个组：" + preview.skippedGroups.join("、")
+												: "")
+											+ ((target.tools || []).length === 0 ? "；目标没有可见工具，复制后配置为空" : "");
+									return h("label", { className: "tm_pick", key: target.id },
+										h("input", {
+											type: "checkbox",
+											checked: copySelected.has(target.id) && !target.broken,
+											disabled: !!target.broken,
+											onChange: () => toggleCopyTarget(target.id),
+										}),
+										h("span", null,
+											h("div", { className: "tm_tool_name" },
+												target.name ? target.name + " · " + target.id : target.id,
+												target.broken ? h("span", { className: "tm_badge off" }, "不可用") : null,
+											),
+											h("div", { className: "tm_copy_meta", title: meta }, meta),
+										),
+									);
+								}))
+								: h("div", { className: "tm_muted" }, "没有其他可复制的 Preset。"),
+							h("div", { className: "tm_muted" }, "提示：分组按目标 Preset 实际拥有的工具裁剪；整组都没有可用工具时会自动跳过。"),
+						),
+						h("div", { className: "tm_modal_foot" },
+							h("button", { className: "tm_btn", onClick: () => setCopyDialog(null) }, "取消"),
+							h("button", {
+								className: "tm_btn primary",
+								disabled: copySelectedCount === 0,
+								onClick: confirmCopy,
+							}, "复制到 " + copySelectedCount + " 个 Preset"),
+						),
+					),
+				),
+				document.body,
+			) : null;
+
 			const empty = listedGroups.length === 0 && visibleTools.length === 0;
 
 			return h("div", { className: "tm_root" },
@@ -930,7 +1131,7 @@ window.__ModuleLoader__.load({
 							className: "tm_preset_select",
 							value: preset.id,
 							disabled: autoGrouping,
-							onChange: (event) => { setActive(event.target.value); setQuery(""); setFilter("all"); setModal(null); setAutoPreview(null); setAutoGroupError(""); setExpanded({}); },
+							onChange: (event) => { setActive(event.target.value); setQuery(""); setFilter("all"); setModal(null); setAutoPreview(null); setCopyDialog(null); setAutoGroupError(""); setExpanded({}); },
 						}, draft.presets.map((item) => h("option", { key: item.id, value: item.id }, (item.name || item.id) + " · " + (item.tools || []).length + " 个工具" + (item.isDefault ? " · 默认" : "") + (item.trust === "user" ? " · 用户" : "")))),
 					),
 				),
@@ -946,6 +1147,22 @@ window.__ModuleLoader__.load({
 						h("div", { className: "tm_row" },
 							h("button", { className: "tm_btn", onClick: startAutoGroup, disabled: autoGrouping || autoGroupCandidates.length === 0, title: autoGroupCandidates.length ? "用默认模型对未分组且未关闭的工具进行聚类" : "没有可自动分组的工具" }, autoGrouping ? "自动分组中…" : "自动分组"),
 							h("button", { className: "tm_btn", onClick: openCreate, disabled: autoGrouping }, "手动分组"),
+							h("button", {
+								className: "tm_btn",
+								onClick: resetPresetConfig,
+								disabled: autoGrouping || busy || !draft.writable || !hasPresetConfig,
+								title: hasPresetConfig
+									? "清空当前 Preset 的全部按需组和已关闭工具"
+									: "当前 Preset 没有可重置的配置",
+							}, "重置配置"),
+							h("button", {
+								className: "tm_btn",
+								onClick: openCopyDialog,
+								disabled: autoGrouping || busy || !draft.writable || !hasPresetConfig || copyTargetCount === 0,
+								title: hasPresetConfig
+									? "把当前 Preset 的分组和已关闭工具复制到其他 Preset"
+									: "当前 Preset 没有可复制的分组或已关闭工具",
+							}, "复制配置"),
 						),
 					),
 					h("div", { className: "tm_stats" },
@@ -974,6 +1191,7 @@ window.__ModuleLoader__.load({
 				dialog,
 				aiConfirmDialog,
 				previewDialog,
+				copyDialogNode,
 			);
 		}
 
@@ -995,6 +1213,9 @@ window.__ModuleLoader__.load({
 
 		exports.apply = apply;
 		exports.inject = inject;
+		// Pure policy projection, exported for unit tests. DSH only consumes
+		// apply/inject, so this does not widen the client plugin contract.
+		exports.copyPresetPolicy = copyPresetPolicy;
 		return module.exports;
 	},
 });

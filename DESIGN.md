@@ -242,7 +242,9 @@ DSH 内置文件/Web 等工具 guidance 会通过 `ctx.tools.get(name, scope)` �
 - 同源 HTTP endpoint 提供 snapshot/save；
 - 保存携带文件存储 revision，拒绝 stale write，并以临时文件原子替换；
 - WebUI 不直接编辑 `agent.cordis.yml`，因此绝不会损坏 shipped preset；
-- 设置页支持搜索、常开/按需/关闭筛选、组内筛选勾选、以及 orphan disable 清理。
+- 设置页支持搜索、常开/按需/关闭筛选、组内筛选勾选、以及 orphan disable 清理；
+- 设置页支持把当前 Preset 的整份策略（全部按需组 + 关闭清单）复制到多个其他 Preset：目标配置整份覆盖，按目标实际工具裁剪组员、跳过空组，只修改页面草稿，保存时仍走同一份 `/save` 校验；不引入全局策略桶，也不改变 `tool-manager.json` 的 `presets` 结构；
+- 设置页支持一键重置当前 Preset 的整份策略：清空全部按需组和关闭清单，恢复为所有工具常开、未分组；同样只修改页面草稿，保存后生效。
 
 生产版仍可：
 
