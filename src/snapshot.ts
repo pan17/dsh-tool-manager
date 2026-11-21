@@ -1,7 +1,8 @@
 import type { AgentPresetsLike, ToolRuntimeLike } from "./dsh.js";
-import { schemasForPreset } from "./dsh.js";
+import { readPresetScope } from "./dsh.js";
 import { policyFor, policyOrphans, resolveActiveGroups, resolveGroups } from "./policy.js";
 import { estimateGroupTokens, estimateToolTokens, presetTokenStats } from "./stats.js";
+import { measurePresetTokens, type TokenModel } from "./transport.js";
 import {
   DISCOVERY_TOOL_NAME,
   PTC_TRANSPORT_NAME,
@@ -25,11 +26,16 @@ export async function buildSnapshot(
   for (const composition of compositions) {
     let schemas: ToolSchemaView[] = [];
     let broken = composition.broken;
+    let model: TokenModel | undefined;
     if (!broken) {
       try {
-        const standing = await schemasForPreset(presets, tools, composition.id);
+        const read = await readPresetScope(presets, composition.id, (scope) => ({
+          schemas: tools.schemas(scope),
+          model: measurePresetTokens(tools, scope),
+        }));
+        model = read.model;
         const observed = observedSchemas?.(composition.id) ?? [];
-        schemas = mergeSchemas(standing, observed)
+        schemas = mergeSchemas(read.schemas, observed)
           .filter((schema) => schema.name !== DISCOVERY_TOOL_NAME && schema.name !== PTC_TRANSPORT_NAME)
           .map(projectSchema);
       } catch (error) {
@@ -40,8 +46,14 @@ export async function buildSnapshot(
     const names = schemas.map((item) => item.name);
     const toolViews: ToolSchemaView[] = schemas.map((schema) => ({
       ...schema,
-      tokens: estimateToolTokens(schema),
+      tokens: model?.marginal(schema.name) ?? estimateToolTokens(schema),
     }));
+    // What the listed tools cannot account for: the transport call and the tools
+    // the editor hides, priced once so the rows and the total still reconcile.
+    const constantTokens = model === undefined
+      ? 0
+      : Math.max(0, model.totalTokens - toolViews.reduce((sum, tool) => sum + (tool.tokens ?? 0), 0));
+    const pricing = model === undefined ? undefined : { constantTokens };
     const tokenByGroup = new Map(
       resolveActiveGroups(policy, names).map((group) => [group.name, estimateGroupTokens(group, toolViews)]),
     );
@@ -58,7 +70,14 @@ export async function buildSnapshot(
       policy,
       groups: groupViews,
       orphans: policyOrphans(policy, names),
-      ...(broken ? {} : { tokenStats: presetTokenStats(toolViews, policy) }),
+      ...(broken
+        ? {}
+        : {
+            tokenStats: presetTokenStats(toolViews, policy, pricing),
+            // Always named, so the page can say which ruler priced the numbers.
+            transport: model?.transport ?? "native",
+            ...(model === undefined ? {} : { constantTokens }),
+          }),
     });
   }
 

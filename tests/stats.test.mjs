@@ -127,4 +127,21 @@ describe("tool-manager token estimates", () => {
     assert.equal(stats.disabledTools, 1);
     assert.equal(stats.disabledTokens, estimateToolsTokens([schemas[3]]));
   });
+
+  it("prices a transport that renders one document per tool plus a fixed floor", () => {
+    const priced = schemas.map((schema) => ({ ...schema, tokens: estimateToolTokens(schema) + 10 }));
+    const policy = {
+      disabled: ["old"],
+      groups: [{ name: "Web", description: "Web tools", patterns: ["web_*"] }],
+    };
+    const stats = presetTokenStats(priced, policy, { constantTokens: 500 });
+    const resident = (list) => list.reduce((sum, tool) => sum + tool.tokens, 0);
+
+    assert.equal(stats.totalTokens, resident(priced) + 500);
+    assert.equal(stats.alwaysOnTokens, resident([priced[0]]));
+    assert.equal(stats.onDemandTokens, resident([priced[1], priced[2]]));
+    assert.equal(stats.disabledTokens, resident([priced[3]]));
+    // Without a transport model the numbers stay the Host's JSON projection.
+    assert.equal(presetTokenStats(schemas, policy).totalTokens, estimateToolsTokens(schemas));
+  });
 });

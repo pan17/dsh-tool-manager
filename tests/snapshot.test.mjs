@@ -136,4 +136,40 @@ describe("snapshot schema merging", () => {
       disabledTokens: estimateToolsTokens([catalog[3]]),
     });
   });
+
+  it("prices a PTC preset from the rendered SDK text and reconciles the total", async () => {
+    const presets = {
+      async compositionInventory() {
+        return [{ id: "standard", isDefault: true }];
+      },
+      async acquireScope() {
+        return { key: "ptc-standard", async [Symbol.asyncDispose]() {} };
+      },
+    };
+    const definitions = [
+      { name: "read", description: "Read a file", parameters: { type: "object" }, output: { schema: { type: "string" } } },
+      { name: "web_search", description: "Search the web", parameters: { type: "object" }, output: { schema: { type: "string" } } },
+      { name: "tool_list", description: "List on-demand tools", parameters: { type: "object" }, output: { schema: { type: "object" } } },
+    ];
+    const render = (list) => "const tools = {\n" + list.map((tool) => "  " + tool.name + ": { output: " + JSON.stringify(tool.output.schema) + " },").join("\n") + "\n};";
+    const executor = {
+      renderSdk: render,
+      describe: () => ({ schemas: [{ name: "run_code", description: "Run TypeScript", parameters: { type: "object", properties: { code: { type: "string" } } } }] }),
+      sections: [{ name: "tools:ptc-only", text: "PTC instruction text" }, { name: "tools:sdk", text: render }],
+    };
+    const tools = { schemas: () => definitions, definitions: () => definitions, selectExecutor: () => executor };
+
+    const snapshot = await buildSnapshot(presets, tools, { presets: {} }, 1, "/tmp/tool-manager.json");
+    const preset = snapshot.presets[0];
+
+    assert.equal(preset.transport, "ptc");
+    assert.deepEqual(preset.tools.map((tool) => tool.name), ["read", "web_search"]);
+    const priced = (list) => Math.ceil(render(list).length / 4);
+    assert.equal(preset.tools[0].tokens, priced(definitions) - priced(definitions.slice(1)));
+    assert.equal(preset.tools[1].tokens, priced(definitions) - priced([definitions[0], definitions[2]]));
+    const listed = preset.tools.reduce((sum, tool) => sum + tool.tokens, 0);
+    assert.equal(preset.tokenStats.totalTokens, listed + preset.constantTokens);
+    // The floor covers run_code, the SDK scaffolding, and the hidden directory tool.
+    assert.ok(preset.constantTokens > priced(definitions) - listed);
+  });
 });
