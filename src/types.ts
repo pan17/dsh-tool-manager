@@ -29,6 +29,29 @@ export interface ToolSchemaView {
   name: string;
   description: string;
   parameters: Record<string, unknown>;
+  /** Estimated resident tokens for this tool's schema, when supplied by a snapshot. */
+  tokens?: number;
+}
+
+export interface ToolTokenEstimate {
+  /** Sum of the group's active member tool schemas. */
+  schema: number;
+  /** The catalog line still injected while the group is closed. */
+  catalog: number;
+  /** Token saved per model request after the group is collapsed. */
+  net: number;
+}
+
+export interface PresetTokenStats {
+  totalTokens: number;
+  alwaysOnTools: number;
+  alwaysOnTokens: number;
+  onDemandTools: number;
+  onDemandTokens: number;
+  onDemandGroups: number;
+  onDemandSavings: number;
+  disabledTools: number;
+  disabledTokens: number;
 }
 
 export interface ResolvedGroupView {
@@ -36,6 +59,8 @@ export interface ResolvedGroupView {
   description?: string;
   patterns: string[];
   tools: string[];
+  /** Present only for groups with active members. */
+  tokens?: ToolTokenEstimate;
 }
 
 export interface PresetOrphans {
@@ -52,6 +77,7 @@ export interface PresetCatalogView {
   policy: PresetToolPolicy;
   groups: ResolvedGroupView[];
   orphans: PresetOrphans;
+  tokenStats?: PresetTokenStats;
 }
 
 export interface ToolManagerSnapshot {

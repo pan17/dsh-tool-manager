@@ -1,6 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { renderCatalogLine } from "../dist/catalog.js";
 import { buildSnapshot, mergeSchemas } from "../dist/snapshot.js";
+import { estimateToolTokens, estimateToolsTokens } from "../dist/stats.js";
 
 function schema(name, description = name) {
   return { name, description, parameters: {} };
@@ -73,6 +75,65 @@ describe("snapshot schema merging", () => {
     const snapshot = await buildSnapshot(presets, tools, { presets: {} }, 1, "/tmp/tool-manager.json");
 
     assert.equal(snapshot.presets[0].broken, "schemas unavailable");
+    assert.equal(snapshot.presets[0].tokenStats, undefined);
     assert.deepEqual(released, ["standard"]);
+  });
+
+  it("attaches per-tool, per-group, and preset token estimates", async () => {
+    const presets = {
+      async compositionInventory() {
+        return [{ id: "standard", isDefault: true }];
+      },
+      async acquireScope() {
+        return { key: "standing-standard", async [Symbol.asyncDispose]() {} };
+      },
+    };
+    const catalog = [
+      schema("read", "Read a file"),
+      schema("web_search", "Search the web"),
+      schema("web_fetch", "Fetch a page"),
+      schema("old", "Old tool"),
+    ];
+    const tools = { schemas: () => catalog };
+    const settings = {
+      presets: {
+        standard: {
+          disabled: ["old"],
+          groups: [
+            { name: "Web", description: "Web tools", patterns: ["web_*"] },
+            { name: "Empty", patterns: ["missing_*"] },
+          ],
+        },
+      },
+    };
+
+    const snapshot = await buildSnapshot(presets, tools, settings, 1, "/tmp/tool-manager.json");
+    const preset = snapshot.presets[0];
+    const group = preset.groups[0];
+
+    assert.deepEqual(preset.tools.map((tool) => tool.tokens), catalog.map(estimateToolTokens));
+    const schemaTokens = estimateToolTokens(catalog[1]) + estimateToolTokens(catalog[2]);
+    const catalogTokens = Math.ceil(renderCatalogLine({
+      name: "Web",
+      description: "Web tools",
+      tools: ["web_search", "web_fetch"],
+    }).length / 4);
+    assert.deepEqual(group.tokens, {
+      schema: schemaTokens,
+      catalog: catalogTokens,
+      net: schemaTokens - catalogTokens,
+    });
+    assert.deepEqual(preset.groups[1].tokens, { schema: 0, catalog: 0, net: 0 });
+    assert.deepEqual(preset.tokenStats, {
+      totalTokens: estimateToolsTokens(catalog),
+      alwaysOnTools: 1,
+      alwaysOnTokens: estimateToolsTokens([catalog[0]]),
+      onDemandTools: 2,
+      onDemandTokens: estimateToolTokens(catalog[1]) + estimateToolTokens(catalog[2]),
+      onDemandGroups: 1,
+      onDemandSavings: schemaTokens - catalogTokens,
+      disabledTools: 1,
+      disabledTokens: estimateToolsTokens([catalog[3]]),
+    });
   });
 });

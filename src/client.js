@@ -15,11 +15,13 @@ window.__ModuleLoader__.load({
 			".tm_head h2{font-size:18px;margin:0 0 5px}.tm_muted{color:var(--dsw-alias-label-secondary,#9097a4);font-size:12px;line-height:1.5}",
 			".tm_preset_picker{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.tm_preset_picker label{font-size:12px;color:var(--dsw-alias-label-secondary,#9097a4)}.tm_select_wrap{position:relative;display:inline-flex;max-width:100%}.tm_select_wrap:after{content:'';position:absolute;right:12px;top:50%;width:7px;height:7px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:translateY(-70%) rotate(45deg);pointer-events:none;opacity:.9}.tm_preset_select,.tm_btn{appearance:none;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));border-radius:8px;background:var(--dsw-alias-bg-layer-1,rgba(128,128,128,.08));color:inherit;padding:7px 10px;font:inherit;font-size:12px}.tm_preset_select{min-width:min(360px,100%);cursor:pointer;padding-right:34px}.tm_preset_select option{background:var(--dsw-alias-bg-base,#17191d);color:inherit}.tm_btn{cursor:pointer}.tm_btn.primary{background:#5367e8;border-color:#5367e8;color:#fff}.tm_btn:disabled{opacity:.5;cursor:not-allowed}",
 			".tm_panel{border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.24));border-radius:12px;background:var(--dsw-alias-bg-layer-1,rgba(128,128,128,.06));overflow:hidden}",
-			".tm_panel_head{padding:13px 14px;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.2));display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.tm_panel_head b{font-size:14px}",
+			".tm_panel_head{padding:13px 14px;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.2));display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;position:relative}.tm_panel_head b{font-size:14px}",
 			".tm_tools{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:0}.tm_tool{display:flex;gap:10px;align-items:flex-start;padding:11px 14px;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.13))}.tm_tool_name{font:600 12px ui-monospace,SFMono-Regular,Consolas,monospace}.tm_tool_desc{font-size:11px;color:var(--dsw-alias-label-secondary,#9097a4);line-height:1.4;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}",
 			".tm_row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.tm_input{box-sizing:border-box;min-width:130px;flex:1;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.3));border-radius:7px;background:var(--dsw-alias-bg-base,#17191d);color:inherit;padding:7px 9px;font:inherit;font-size:12px}.tm_code{font:11px ui-monospace,SFMono-Regular,Consolas,monospace;color:#9da8ff}.tm_notice{padding:12px;border-radius:9px;background:color-mix(in srgb,#f59e0b 12%,transparent);font-size:12px}.tm_error{padding:12px;border-radius:9px;background:color-mix(in srgb,#ef4444 12%,transparent);color:#fca5a5;font-size:12px}",
 			".tm_filters{display:flex;gap:6px;flex-wrap:wrap;align-items:center}.tm_chip{appearance:none;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));border-radius:999px;background:transparent;color:inherit;padding:4px 9px;cursor:pointer;font:inherit;font-size:11px}.tm_chip.active{border-color:#7c8cff;background:color-mix(in srgb,#7c8cff 16%,transparent)}",
 			".tm_stats{display:grid;grid-template-columns:repeat(5,minmax(100px,1fr));gap:8px;padding:10px 14px;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.13))}.tm_stat{min-width:0;padding:9px 10px;border-radius:8px;background:var(--dsw-alias-bg-layer-1,rgba(128,128,128,.07));border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.15))}.tm_stat_value{font-size:18px;font-weight:700;line-height:1.2}.tm_stat_label{margin-top:3px;font-size:11px;color:var(--dsw-alias-label-secondary,#9097a4)}@media(max-width:720px){.tm_stats{grid-template-columns:repeat(2,minmax(100px,1fr))}}",
+			".tm_token{display:inline-flex;align-items:center;margin-left:6px;padding:1px 6px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.22));border-radius:999px;background:var(--dsw-alias-bg-layer-1,rgba(128,128,128,.09));font:600 10px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--dsw-alias-label-secondary,#9097a4);white-space:nowrap;vertical-align:middle}.tm_tool>.tm_token{margin-left:auto;flex:0 0 auto}.tm_stat_extra{margin-top:2px;font-size:10px;color:var(--dsw-alias-label-secondary,#9097a4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
+			".tm_help{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;margin-left:6px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));border-radius:50%;background:var(--dsw-alias-bg-layer-1,rgba(128,128,128,.08));color:var(--dsw-alias-label-secondary,#9097a4);font:700 10px/1 ui-sans-serif,system-ui,sans-serif;cursor:help;vertical-align:middle;outline:none}.tm_help:hover,.tm_help:focus-visible{border-color:#7c8cff;color:#9da8ff}.tm_help::after{content:attr(data-tip);position:absolute;left:0;top:calc(100% + 6px);width:min(520px,calc(100vw - 48px));max-width:100%;padding:10px 12px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));border-radius:9px;background:var(--dsw-alias-bg-base,#17191d);box-shadow:0 14px 40px rgba(0,0,0,.35);color:var(--dsw-alias-label-primary,#e7e9ed);font:400 12px/1.65 ui-sans-serif,system-ui,sans-serif;white-space:pre-line;text-align:left;opacity:0;visibility:hidden;pointer-events:none;z-index:30;transition:opacity .12s ease}.tm_help:hover::after,.tm_help:focus-visible::after{opacity:1;visibility:visible}",
 			".tm_badge{display:inline-block;margin-left:6px;padding:2px 7px;border:1px solid transparent;border-radius:999px;font-size:10px;font-weight:700;line-height:1.35;letter-spacing:.02em;vertical-align:middle;color:#fff}.tm_badge.off{background:#b42318;border-color:#d92d20;color:#fff}.tm_badge.cold{background:#4338ca;border-color:#6366f1;color:#fff}.tm_badge.live{background:#15803d;border-color:#22c55e;color:#fff}",
 			".tm_group{border-bottom:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.13))}.tm_group:last-child{border-bottom:0}",
 			".tm_group_bar{display:flex;align-items:center;gap:8px;padding:11px 14px}",
@@ -192,6 +194,115 @@ window.__ModuleLoader__.load({
 			}
 			return { totalTools: (preset.tools || []).length, groupCount: (preset.policy.groups || []).length, ungroupedTools, onDemandTools, disabledTools };
 		}
+		// Token estimates mirror the Host's `@deepseek-ai/dsh-token-meter/estimate`
+		// (4 characters per token) so the editor updates live while groups are
+		// dragged around in the draft, before a save reaches the Host snapshot.
+		function estimateToolTokens(tool) {
+			try {
+				return Math.ceil(JSON.stringify({
+					name: tool.name,
+					description: tool.description,
+					parameters: tool.parameters,
+				}).length / 4);
+			} catch {
+				return null;
+			}
+		}
+		function estimateToolsTokens(tools) {
+			const list = (tools || []).map((tool) => ({
+				name: tool.name,
+				description: tool.description,
+				parameters: tool.parameters,
+			}));
+			if (list.length === 0) return 0;
+			try {
+				return Math.ceil(JSON.stringify(list).length / 4) + 4;
+			} catch {
+				return null;
+			}
+		}
+		function escapeCatalogText(value) {
+			return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+		}
+		function renderCatalogLine(group, members) {
+			const heading = "- " + escapeCatalogText(group.name || "") + " (" + members.length + " tools)"
+				+ (group.description ? ": " + escapeCatalogText(group.description) : "");
+			return heading + "\n  Tools: " + members.map((tool) => escapeCatalogText(tool.name)).join(", ");
+		}
+		function estimateGroupTokens(group, members) {
+			if (members.length === 0) return { schema: 0, catalog: 0, net: 0 };
+			let schema = 0;
+			for (const tool of members) {
+				const tokens = estimateToolTokens(tool);
+				if (tokens === null) return null;
+				schema += tokens;
+			}
+			const catalog = Math.ceil(renderCatalogLine(group, members).length / 4);
+			return { schema, catalog, net: schema - catalog };
+		}
+		function activeGroupViews(preset) {
+			const disabled = new Set(preset.policy.disabled || []);
+			const claimed = new Set();
+			const active = [];
+			for (const group of preset.policy.groups || []) {
+				const members = matchingTools(preset.tools, group.patterns)
+					.filter((tool) => !disabled.has(tool.name) && !claimed.has(tool.name));
+				if (members.length === 0) continue;
+				for (const tool of members) claimed.add(tool.name);
+				active.push({ group, members });
+			}
+			return { active, claimed, disabled };
+		}
+		function presetTokenStats(preset) {
+			const { active, claimed, disabled } = activeGroupViews(preset);
+			const allTools = preset.tools || [];
+			const alwaysOn = allTools.filter((tool) => !disabled.has(tool.name) && !claimed.has(tool.name));
+			const onDemand = allTools.filter((tool) => claimed.has(tool.name));
+			const disabledTools = allTools.filter((tool) => disabled.has(tool.name));
+			let onDemandTokens = 0;
+			let onDemandSavings = 0;
+			for (const item of active) {
+				const tokens = estimateGroupTokens(item.group, item.members);
+				if (tokens) {
+					onDemandTokens += tokens.schema;
+					onDemandSavings += tokens.net;
+				}
+			}
+			return {
+				totalTokens: estimateToolsTokens(allTools),
+				alwaysOnTools: alwaysOn.length,
+				alwaysOnTokens: estimateToolsTokens(alwaysOn),
+				onDemandTools: onDemand.length,
+				onDemandTokens,
+				onDemandGroups: active.length,
+				onDemandSavings,
+				disabledTools: disabledTools.length,
+				disabledTokens: estimateToolsTokens(disabledTools),
+			};
+		}
+		function groupTokenEstimates(preset) {
+			const map = new Map();
+			for (const item of activeGroupViews(preset).active) {
+				map.set(item.group._key || item.group.name, estimateGroupTokens(item.group, item.members));
+			}
+			return map;
+		}
+		function formatTokenCount(value) {
+			if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+			if (Math.abs(value) >= 1000) {
+				return String(Math.round(value / 100) / 10).replace(/\.0$/, "") + "k";
+			}
+			return String(Math.round(value));
+		}
+		function formatTokenAmount(value) {
+			return typeof value === "number" && Number.isFinite(value) ? "~" + formatTokenCount(value) : "—";
+		}
+		function tokenBadge(tokens, title) {
+			if (typeof tokens !== "number" || !Number.isFinite(tokens)) {
+				return h("span", { className: "tm_token", title: "估算不可用（4 字符/token）" }, "—");
+			}
+			return h("span", { className: "tm_token", title: title || "估算（4 字符/token）" }, "~" + formatTokenCount(tokens) + " tok");
+		}
 		function matchesQuery(tool, needle) {
 			if (!needle) return true;
 			return tool.name.toLowerCase().includes(needle) || (tool.description || "").toLowerCase().includes(needle);
@@ -284,6 +395,12 @@ window.__ModuleLoader__.load({
 				h("button", { className: "tm_btn", onClick: dismiss, disabled: dismissing }, dismissing ? "处理中…" : "知道了"),
 			);
 		}
+
+		const TOOL_CATALOG_HELP = [
+			"关掉后立刻对模型隐藏。按需组默认隐藏，模型要先调用 tool_list 打开所在组才能使用。",
+			"",
+			"tool_list 只在当前 Preset 有有效按需组时才出现（保存后从下一个模型步骤生效），没有有效按需组时模型看不到它；它由插件自动管理，不出现在本页工具目录中，也不能在这里开关或分组。",
+		].join("\n");
 
 		function ToolManagerSection() {
 			const [snapshot, setSnapshot] = react.useState(null);
@@ -696,6 +813,9 @@ window.__ModuleLoader__.load({
 			const grouped = groupedNames(preset);
 			const autoGroupCandidates = (preset.tools || []).filter((tool) => !disabled.has(tool.name) && !grouped.has(tool.name));
 			const stats = catalogStats(preset);
+			const tokenStats = presetTokenStats(preset);
+			const onDemandCatalogTokens = Math.max(0, tokenStats.onDemandTokens - tokenStats.onDemandSavings);
+			const groupTokens = groupTokenEstimates(preset);
 			const presetPolicy = preset.policy || { disabled: [], groups: [] };
 			const hasPresetConfig = !preset.broken
 				&& ((presetPolicy.groups || []).length > 0 || (presetPolicy.disabled || []).length > 0);
@@ -763,6 +883,7 @@ window.__ModuleLoader__.load({
 				const key = group._key;
 				const open = !!expanded[key];
 				const members = matchingTools(preset.tools, group.patterns);
+				const estimate = groupTokens.get(key) || null;
 				const title = (group.name || "").trim() || "未命名分组";
 				return h("div", { className: "tm_group", key: key },
 					h("div", { className: "tm_group_bar" },
@@ -771,15 +892,20 @@ window.__ModuleLoader__.load({
 							h("div", { className: "tm_group_title" }, title, h("span", { className: "tm_badge cold" }, "按需")),
 							h("div", { className: "tm_group_sub" }, group.description || "没有描述"),
 						),
+						estimate && estimate.schema > 0 ? tokenBadge(estimate.net, "估算（4 字符/token）：组内工具 schema " + formatTokenAmount(estimate.schema) + " tok · 关闭时目录行 " + formatTokenAmount(estimate.catalog) + " tok · 收起净省 " + formatTokenAmount(estimate.net) + " tok/轮") : null,
 						h("span", { className: "tm_group_count" }, members.length + " 个工具"),
 						h("button", { className: "tm_btn", onClick: () => openEdit(group) }, "编辑"),
 						h("button", { className: "tm_btn", onClick: () => deleteGroup(key) }, "删除"),
 					),
 					open ? h("div", { className: "tm_group_body" }, members.length
-						? members.map((tool) => h("div", { className: "tm_member", key: tool.name },
-							h("div", { className: "tm_tool_name" }, tool.name, disabled.has(tool.name) ? h("span", { className: "tm_badge off" }, "关闭") : null),
-							h("div", { className: "tm_tool_desc", title: tool.description }, tool.description),
-						))
+						? members.map((tool) => {
+							const tokens = estimateToolTokens(tool);
+							const isDisabled = disabled.has(tool.name);
+							return h("div", { className: "tm_member", key: tool.name },
+								h("div", { className: "tm_tool_name" }, tool.name, isDisabled ? h("span", { className: "tm_badge off" }, "关闭") : null, tokenBadge(tokens, isDisabled ? "估算（4 字符/token）：已关闭，开启后常驻 " + formatTokenAmount(tokens) + " tok/轮" : "估算（4 字符/token）：单工具常驻 " + formatTokenAmount(tokens) + " tok/轮")),
+								h("div", { className: "tm_tool_desc", title: tool.description }, tool.description),
+							);
+						})
 						: h("div", { className: "tm_error" }, "无效空组：请编辑并选择至少一个可用工具，或删除该组。"),
 					) : null,
 				);
@@ -787,6 +913,7 @@ window.__ModuleLoader__.load({
 
 			function renderTool(tool) {
 				const enabled = !disabled.has(tool.name);
+				const tokens = estimateToolTokens(tool);
 				return h("label", { className: "tm_tool", key: tool.name },
 					h("input", { type: "checkbox", checked: enabled, onChange: () => toggleTool(tool.name) }),
 					h("span", null,
@@ -795,6 +922,7 @@ window.__ModuleLoader__.load({
 						),
 						h("div", { className: "tm_tool_desc", title: tool.description }, tool.description),
 					),
+					tokenBadge(tokens, enabled ? "估算（4 字符/token）：单工具常驻 " + formatTokenAmount(tokens) + " tok/轮" : "估算（4 字符/token）：已关闭，开启后常驻 " + formatTokenAmount(tokens) + " tok/轮"),
 				);
 			}
 
@@ -1140,9 +1268,7 @@ window.__ModuleLoader__.load({
 				h("section", { className: "tm_panel" },
 					h("div", { className: "tm_panel_head" },
 						h("div", null,
-							h("b", null, "工具目录"),
-							h("div", { className: "tm_muted" }, "关掉后立刻对模型隐藏。按需组默认隐藏，模型要先调用 tool_list 打开所在组才能使用。"),
-							h("div", { className: "tm_muted" }, "tool_list 只在当前 Preset 有有效按需组时才出现（保存后从下一个模型步骤生效），没有有效按需组时模型看不到它；它由插件自动管理，不出现在本页工具目录中，也不能在这里开关或分组。"),
+							h("b", null, "工具目录", h("span", { className: "tm_help", tabIndex: 0, "aria-label": "工具目录说明", "data-tip": TOOL_CATALOG_HELP }, "?")),
 						),
 						h("div", { className: "tm_row" },
 							h("button", { className: "tm_btn", onClick: startAutoGroup, disabled: autoGrouping || autoGroupCandidates.length === 0, title: autoGroupCandidates.length ? "用默认模型对未分组且未关闭的工具进行聚类" : "没有可自动分组的工具" }, autoGrouping ? "自动分组中…" : "自动分组"),
@@ -1166,8 +1292,14 @@ window.__ModuleLoader__.load({
 						),
 					),
 					h("div", { className: "tm_stats" },
-						[["工具总量", stats.totalTools], ["分组数量", stats.groupCount], ["未分组工具", stats.ungroupedTools], ["按需工具", stats.onDemandTools], ["已关闭工具", stats.disabledTools]].map(([label, value]) =>
-							h("div", { className: "tm_stat", key: label }, h("div", { className: "tm_stat_value" }, value), h("div", { className: "tm_stat_label" }, label)),
+						[
+							["工具总量", stats.totalTools, formatTokenAmount(tokenStats.totalTokens) + " tok", "全部 " + stats.totalTools + " 个工具 schema 合计 " + formatTokenAmount(tokenStats.totalTokens) + " tok/轮（全部常驻时）"],
+							["分组数量", stats.groupCount, "省 " + formatTokenAmount(tokenStats.onDemandSavings) + " tok", "全部 " + tokenStats.onDemandGroups + " 个按需组收起：工具 schema 合计 " + formatTokenAmount(tokenStats.onDemandTokens) + " tok − 关闭态目录行 " + formatTokenAmount(onDemandCatalogTokens) + " tok = 净省 " + formatTokenAmount(tokenStats.onDemandSavings) + " tok/轮"],
+							["未分组工具", stats.ungroupedTools, formatTokenAmount(tokenStats.alwaysOnTokens) + " tok", "未分组且未关闭的 " + tokenStats.alwaysOnTools + " 个工具每轮常驻 " + formatTokenAmount(tokenStats.alwaysOnTokens) + " tok"],
+							["按需工具", stats.onDemandTools, formatTokenAmount(tokenStats.onDemandTokens) + " tok", "按需组内 " + tokenStats.onDemandTools + " 个工具 schema 合计 " + formatTokenAmount(tokenStats.onDemandTokens) + " tok；收起后仍会注入目录行 " + formatTokenAmount(onDemandCatalogTokens) + " tok，实际净省见「分组数量」卡"],
+							["已关闭工具", stats.disabledTools, formatTokenAmount(tokenStats.disabledTokens) + " tok", "已关闭的 " + tokenStats.disabledTools + " 个工具关闭可省 " + formatTokenAmount(tokenStats.disabledTokens) + " tok/轮"],
+						].map(([label, value, extra, title]) =>
+							h("div", { className: "tm_stat", key: label }, h("div", { className: "tm_stat_value" }, value), h("div", { className: "tm_stat_label" }, label), h("div", { className: "tm_stat_extra", title }, extra)),
 						),
 					),
 					h("div", { className: "tm_row", style: { padding: "10px 14px" } },
@@ -1216,6 +1348,11 @@ window.__ModuleLoader__.load({
 		// Pure policy projection, exported for unit tests. DSH only consumes
 		// apply/inject, so this does not widen the client plugin contract.
 		exports.copyPresetPolicy = copyPresetPolicy;
+		exports.estimateToolTokens = estimateToolTokens;
+		exports.estimateToolsTokens = estimateToolsTokens;
+		exports.estimateGroupTokens = estimateGroupTokens;
+		exports.presetTokenStats = presetTokenStats;
+		exports.formatTokenCount = formatTokenCount;
 		return module.exports;
 	},
 });

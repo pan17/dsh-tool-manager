@@ -1,6 +1,7 @@
 import type { AgentPresetsLike, ToolRuntimeLike } from "./dsh.js";
 import { schemasForPreset } from "./dsh.js";
-import { policyFor, policyOrphans, resolveGroups } from "./policy.js";
+import { policyFor, policyOrphans, resolveActiveGroups, resolveGroups } from "./policy.js";
+import { estimateGroupTokens, estimateToolTokens, presetTokenStats } from "./stats.js";
 import {
   DISCOVERY_TOOL_NAME,
   PTC_TRANSPORT_NAME,
@@ -37,15 +38,27 @@ export async function buildSnapshot(
     }
     const policy = policyFor(settings, composition.id);
     const names = schemas.map((item) => item.name);
+    const toolViews: ToolSchemaView[] = schemas.map((schema) => ({
+      ...schema,
+      tokens: estimateToolTokens(schema),
+    }));
+    const tokenByGroup = new Map(
+      resolveActiveGroups(policy, names).map((group) => [group.name, estimateGroupTokens(group, toolViews)]),
+    );
+    const groupViews = resolveGroups(policy, names).map((group) => ({
+      ...group,
+      tokens: tokenByGroup.get(group.name) ?? { schema: 0, catalog: 0, net: 0 },
+    }));
     views.push({
       id: composition.id,
       ...(composition.name ? { name: composition.name } : {}),
       isDefault: composition.isDefault,
       ...(broken ? { broken } : {}),
-      tools: schemas,
+      tools: toolViews,
       policy,
-      groups: resolveGroups(policy, names),
+      groups: groupViews,
       orphans: policyOrphans(policy, names),
+      ...(broken ? {} : { tokenStats: presetTokenStats(toolViews, policy) }),
     });
   }
 

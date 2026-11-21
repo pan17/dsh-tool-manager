@@ -193,7 +193,7 @@ export function applyCatalogDecision<T>(
   };
 }
 
-function renderCatalogLine(entry: CatalogEntry): string {
+export function renderCatalogLine(entry: CatalogEntry): string {
   const heading = `- ${escapeText(entry.name)} (${entry.tools.length} tools)${entry.description ? `: ${escapeText(entry.description)}` : ""}`;
   return `${heading}\n  Tools: ${entry.tools.map(escapeText).join(", ")}`;
 }

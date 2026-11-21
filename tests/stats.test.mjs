@@ -1,8 +1,22 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { toolCatalogStats } from "../dist/stats.js";
+import { renderCatalogLine } from "../dist/catalog.js";
+import {
+  estimateGroupTokens,
+  estimateToolTokens,
+  estimateToolsTokens,
+  presetTokenStats,
+  toolCatalogStats,
+} from "../dist/stats.js";
 
 const tools = ["read", "write", "web_search", "web_fetch", "old"].map((name) => ({ name }));
+
+const schemas = [
+  { name: "read", description: "Read a file", parameters: { type: "object", properties: { path: { type: "string" } } } },
+  { name: "web_search", description: "Search the web", parameters: { type: "object", properties: { query: { type: "string" } } } },
+  { name: "web_fetch", description: "Fetch a page", parameters: { type: "object", properties: { url: { type: "string" } } } },
+  { name: "old", description: "Old tool", parameters: {} },
+];
 
 describe("tool-manager catalog stats", () => {
   it("classifies real tools into exclusive states", () => {
@@ -48,5 +62,69 @@ describe("tool-manager catalog stats", () => {
       onDemandTools: 0,
       disabledTools: 0,
     });
+  });
+});
+
+describe("tool-manager token estimates", () => {
+  it("uses the host's 4 characters per token projection", () => {
+    for (const schema of schemas) {
+      const expected = Math.ceil(JSON.stringify({
+        name: schema.name,
+        description: schema.description,
+        parameters: schema.parameters,
+      }).length / 4);
+      assert.equal(estimateToolTokens(schema), expected);
+    }
+  });
+
+  it("counts an empty tool array as zero and keeps array framing", () => {
+    assert.equal(estimateToolsTokens([]), 0);
+    assert.equal(estimateToolsTokens(schemas), Math.ceil(JSON.stringify(schemas).length / 4) + 4);
+  });
+
+  it("subtracts the closed-state catalog line from group schema tokens", () => {
+    const group = { name: "Web", description: "Web tools", tools: ["web_search", "web_fetch"] };
+    const estimate = estimateGroupTokens(group, schemas);
+    const schema = estimateToolTokens(schemas[1]) + estimateToolTokens(schemas[2]);
+    const catalog = Math.ceil(renderCatalogLine({
+      name: "Web",
+      description: "Web tools",
+      tools: ["web_search", "web_fetch"],
+    }).length / 4);
+
+    assert.deepEqual(estimate, { schema, catalog, net: schema - catalog });
+  });
+
+  it("keeps an empty group at zero because it never enters the catalog", () => {
+    assert.deepEqual(estimateGroupTokens({ name: "Empty", tools: [] }, schemas), {
+      schema: 0,
+      catalog: 0,
+      net: 0,
+    });
+  });
+
+  it("summarizes always-on tools and first-match group savings", () => {
+    const policy = {
+      disabled: ["old"],
+      groups: [
+        { name: "Web", description: "Web tools", patterns: ["web_*"] },
+        { name: "Search duplicate", patterns: ["web_search"] },
+      ],
+    };
+    const stats = presetTokenStats(schemas, policy);
+    const group = estimateGroupTokens(
+      { name: "Web", description: "Web tools", tools: ["web_search", "web_fetch"] },
+      schemas,
+    );
+
+    assert.equal(stats.totalTokens, estimateToolsTokens(schemas));
+    assert.equal(stats.alwaysOnTools, 1);
+    assert.equal(stats.alwaysOnTokens, estimateToolsTokens([schemas[0]]));
+    assert.equal(stats.onDemandTools, 2);
+    assert.equal(stats.onDemandTokens, estimateToolTokens(schemas[1]) + estimateToolTokens(schemas[2]));
+    assert.equal(stats.onDemandGroups, 1);
+    assert.equal(stats.onDemandSavings, group.net);
+    assert.equal(stats.disabledTools, 1);
+    assert.equal(stats.disabledTokens, estimateToolsTokens([schemas[3]]));
   });
 });
