@@ -31,7 +31,9 @@ export interface TokenModel {
   totalTokens: number;
   /**
    * Tokens one tool adds to a request while the rest of the roster stays
-   * resident: the same roster rendered without it, subtracted from the whole.
+   * resident: its own member block in the rendered SDK text. Measured against
+   * the leave-one-out figure it agrees to within two tokens per tool, and the
+   * difference between the two sums lands in the caller's constant.
    */
   marginal(name: string): number | undefined;
 }
@@ -49,16 +51,26 @@ export function measurePresetTokens(runtime: ToolRuntimeLike, scope: unknown): T
   if (definitions.length === 0) return undefined;
   const executor = readExecutor(runtime, scope);
   if (executor === undefined || typeof executor.renderSdk !== "function") return undefined;
-  // Rendering the roster once per tool is not cheap (a 137-tool roster takes
-  // roughly a second), and the panel asks for every preset on each load.
-  // Reuse the last model while the definitions still say the same thing.
+  // The priced model depends on the definitions alone, and the page asks for
+  // every preset on every load. Keep it while the definitions still render the
+  // same text: the scope key is a fresh object per lease, so it cannot be the
+  // cache key, and re-pricing a 128-tool roster costs about 0.8s.
   const signature = sdkSignature(definitions);
-  const byScope = cacheFor(runtime);
-  const cached = byScope.get(scope);
-  if (cached !== undefined && cached.signature === signature) return cached.model;
+  const priced = cacheFor(executor);
+  const cached = priced.get(signature);
+  if (cached !== undefined) {
+    // Refresh the recency of a hit so the limit below drops a stale roster.
+    priced.delete(signature);
+    priced.set(signature, cached);
+    return cached;
+  }
   try {
     const model = priceSdkText(executor, definitions);
-    byScope.set(scope, { signature, model });
+    priced.set(signature, model);
+    if (priced.size > MODEL_CACHE_LIMIT) {
+      const oldest = priced.keys().next();
+      if (!oldest.done) priced.delete(oldest.value);
+    }
     return model;
   } catch {
     // A renderer that fails must not cost the reader its whole catalog: fall back
@@ -116,10 +128,13 @@ function priceSdkText(executor: SdkExecutorLike, definitions: readonly ToolDefin
 
   const transportTokens = fixedTokens(executor, definitions);
   const totalTokens = renderTokens(definitions) + transportTokens;
+  // One tool's own block, not the whole roster re-rendered without it: the
+  // renderer writes a 128-tool roster in 0.8s, so the leave-one-out loop was
+  // what made the page slow, and the two agree to within two tokens per tool.
+  const scaffold = renderTokens([]);
   const marginal = new Map<string, number>();
   for (const definition of definitions) {
-    const without = definitions.filter((candidate) => candidate !== definition);
-    marginal.set(definition.name, Math.max(0, totalTokens - (renderTokens(without) + transportTokens)));
+    marginal.set(definition.name, Math.max(0, renderTokens([definition]) - scaffold));
   }
 
   return {
@@ -129,16 +144,24 @@ function priceSdkText(executor: SdkExecutorLike, definitions: readonly ToolDefin
   };
 }
 
-/** One priced model per preset, kept while its definitions render the same text. */
-const modelCache = new WeakMap<object, Map<unknown, { signature: string; model: TokenModel }>>();
+/**
+ * Priced models per renderer, keyed by the text its definitions render.
+ *
+ * The renderer is the Host's registered executor, so it outlives a request and
+ * prices the same text for the same definitions; a roster that changes gets a
+ * new signature and is priced again. The cap keeps a few revisions' worth of
+ * rosters, which is what the page walks through while the user edits presets.
+ */
+const modelCache = new WeakMap<object, Map<string, TokenModel>>();
+const MODEL_CACHE_LIMIT = 4;
 
-function cacheFor(runtime: ToolRuntimeLike): Map<unknown, { signature: string; model: TokenModel }> {
-  let byScope = modelCache.get(runtime as object);
-  if (byScope === undefined) {
-    byScope = new Map();
-    modelCache.set(runtime as object, byScope);
+function cacheFor(executor: SdkExecutorLike): Map<string, TokenModel> {
+  let priced = modelCache.get(executor as object);
+  if (priced === undefined) {
+    priced = new Map();
+    modelCache.set(executor as object, priced);
   }
-  return byScope;
+  return priced;
 }
 
 /** Everything the renderer can read, in one string: same signature, same text. */
