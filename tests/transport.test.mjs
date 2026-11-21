@@ -39,13 +39,33 @@ describe("tool-manager transport pricing", () => {
     assert.equal(model.totalTokens, Math.ceil(render(definitions).length / 4) + fixed);
   });
 
-  it("prices one tool by rendering the roster without it", () => {
+  it("prices one tool by its own member block", () => {
     const model = measurePresetTokens(ptcRuntime(), "scope");
-    const full = Math.ceil(render(definitions).length / 4);
-    const withoutRead = Math.ceil(render(definitions.slice(1)).length / 4);
+    const scaffold = Math.ceil(render([]).length / 4);
 
-    assert.equal(model.marginal("read"), full - withoutRead);
+    assert.equal(model.marginal("read"), Math.ceil(render([definitions[0]]).length / 4) - scaffold);
     assert.equal(model.marginal("absent"), undefined);
+  });
+
+  it("prices the roster in one pass instead of once per tool", () => {
+    let renders = 0;
+    const roster = Array.from({ length: 40 }, (_, index) => ({
+      name: "tool_" + index,
+      description: "Tool " + index,
+      parameters: { type: "object" },
+      output: { schema: { type: "string" } },
+    }));
+    const runtime = {
+      definitions: () => roster,
+      selectExecutor: () => ({ renderSdk: (list) => { renders += 1; return render(list); }, sections: [] }),
+    };
+
+    const model = measurePresetTokens(runtime, "one-pass");
+    // One render for the whole roster, one for the bare scaffold, one per tool:
+    // the leave-one-out loop this replaced rendered the whole roster per tool.
+    assert.ok(renders <= roster.length + 2, "rendered " + renders + " times for " + roster.length + " tools");
+    const rows = roster.reduce((sum, tool) => sum + (model.marginal(tool.name) ?? 0), 0);
+    assert.ok(rows <= model.totalTokens, "the rows must not outgrow the total");
   });
 
   it("falls back to no model when the renderer throws", () => {
@@ -53,26 +73,27 @@ describe("tool-manager transport pricing", () => {
     assert.equal(measurePresetTokens(runtime, "scope"), undefined);
   });
 
-  it("reuses the rendered model until the definitions change", () => {
+  it("reuses the priced model across requests until the definitions change", () => {
     let renders = 0;
     let current = definitions;
-    const runtime = {
-      definitions: () => current,
-      selectExecutor: () => ({
-        renderSdk: (list) => { renders += 1; return render(list); },
-        describe: () => ({ schemas: [{ name: "run_code", description: "Run TypeScript", parameters: { type: "object" } }] }),
-        sections: [],
-      }),
+    const executor = {
+      renderSdk: (list) => { renders += 1; return render(list); },
+      describe: () => ({ schemas: [{ name: "run_code", description: "Run TypeScript", parameters: { type: "object" } }] }),
+      sections: [],
     };
+    // Every request leases its own scope key and resolves the services again, so
+    // reuse must not hinge on either: the Host's registered executor is the one
+    // thing that outlives a request, which is what the cache is keyed by.
+    const request = () => ({ definitions: () => current, selectExecutor: () => executor });
 
-    const first = measurePresetTokens(runtime, "memo-scope");
+    const first = measurePresetTokens(request(), { lease: 1 });
     const afterFirst = renders;
-    const second = measurePresetTokens(runtime, "memo-scope");
+    const second = measurePresetTokens(request(), { lease: 2 });
     assert.equal(renders, afterFirst, "an unchanged roster must not render again");
     assert.equal(second.totalTokens, first.totalTokens);
 
     current = [...definitions, { name: "edit", description: "Edit a file", parameters: { type: "object" }, output: { schema: { type: "string" } } }];
-    measurePresetTokens(runtime, "memo-scope");
+    measurePresetTokens(request(), { lease: 3 });
     assert.ok(renders > afterFirst, "a changed roster must be re-rendered");
   });
 
