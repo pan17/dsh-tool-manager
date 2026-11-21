@@ -10,6 +10,10 @@
 - token 成本估算现在区分 transport（issue #6 后续讨论）：原生模式下模型读到的就是工具 schema 的 JSON，沿用 1.4.0 的口径不变；**PTC 模式下工具定义不在请求的 `tools` 里，而是渲染成 TypeScript SDK 文本放进系统提示词**，其中每个工具的 `output` 类型同样占上下文。现在 PTC 模式直接对执行器导出的 `renderSdk()` 产物计价：每个工具行显示「去掉该工具后重新渲染」得到的边际 token，统计卡新增第六格「平台常数」显示每轮固定开销（`run_code` 声明、PTC 指令段、`renderSdk([])` 的脚手架、被过滤掉的 `tool_list` 目录行，取「总计 − 各行之和」，不逐项拆），因此 PTC 下「各行之和 + 常数」即为总计。总计沿用 1.4.0 的「全部工具常驻」口径（按需组和已关闭的工具按开启后计入），不是单次请求实际渲染的集合。Preset 卡片旁显示 `PTC` / `原生` 徽标，悬停提示写明当次用的单位注（「PTC SDK 文本 ÷4」/「工具 JSON ÷4」）；快照为每个 Preset 附带 `transport`，PTC 下另附 `constantTokens`。两种口径量的是两段不同文本，不可横向比较。
 - 取数不改宿主：`ToolRuntimeLike` 新增可选的 `definitions()` 与 `selectExecutor()`，配合执行器导出的 `renderSdk` 直接量渲染文本（`schemas()` 会裁掉 `output`，所以改读 `definitions()`）。同一 Preset 的渲染结果按定义内容（名称、描述、参数、输出）缓存，内容不变就不再重渲染（137 个工具的首次约 0.5s，之后约 0.3ms），工具面变化即失效。宿主不提供这些入口、或渲染抛错时，`measurePresetTokens` 返回 `undefined`，估算回落原有 JSON 口径；`PresetTokenStats` 结构不变，新增的 `transport` / `constantTokens` 挂在 Preset 视图上。
 
+### Changed
+
+- 工具目录的统计卡从「`auto-fit` 自适应网格」改为**始终一行**：六格（原生模式五格）等分宽度并排，卡片内边距 `9px 10px` → `6px 7px`，数值 `18px` → `15px`，标签 `11px` → `10px`，token 小字 `10px` → `9.5px`，于是 552px 宽的面板下统计区高度从 177px 降到 77px（少了一整行的滚动空间）。面板过窄时数值、标签与 token 小字以省略号收尾，视口 ≤560px 时回退为三列自动换行。
+
 ## [1.4.0] - 2026-11-21
 
 ### Added
