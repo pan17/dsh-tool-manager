@@ -19,10 +19,10 @@ window.__ModuleLoader__.load({
 			".tm_tools{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:0}.tm_tool{display:flex;gap:10px;align-items:flex-start;padding:11px 14px;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.13))}.tm_tool_name{font:600 12px ui-monospace,SFMono-Regular,Consolas,monospace}.tm_tool_desc{font-size:11px;color:var(--dsw-alias-label-secondary,#9097a4);line-height:1.4;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}",
 			".tm_row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.tm_input{box-sizing:border-box;min-width:130px;flex:1;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.3));border-radius:7px;background:var(--dsw-alias-bg-base,#17191d);color:inherit;padding:7px 9px;font:inherit;font-size:12px}.tm_code{font:11px ui-monospace,SFMono-Regular,Consolas,monospace;color:#9da8ff}.tm_notice{padding:12px;border-radius:9px;background:color-mix(in srgb,#f59e0b 12%,transparent);font-size:12px}.tm_error{padding:12px;border-radius:9px;background:color-mix(in srgb,#ef4444 12%,transparent);color:#fca5a5;font-size:12px}",
 			".tm_filters{display:flex;gap:6px;flex-wrap:wrap;align-items:center}.tm_chip{appearance:none;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));border-radius:999px;background:transparent;color:inherit;padding:4px 9px;cursor:pointer;font:inherit;font-size:11px}.tm_chip.active{border-color:#7c8cff;background:color-mix(in srgb,#7c8cff 16%,transparent)}",
-			".tm_stats{display:grid;grid-template-columns:repeat(5,minmax(100px,1fr));gap:8px;padding:10px 14px;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.13))}.tm_stat{min-width:0;padding:9px 10px;border-radius:8px;background:var(--dsw-alias-bg-layer-1,rgba(128,128,128,.07));border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.15))}.tm_stat_value{font-size:18px;font-weight:700;line-height:1.2}.tm_stat_label{margin-top:3px;font-size:11px;color:var(--dsw-alias-label-secondary,#9097a4)}@media(max-width:720px){.tm_stats{grid-template-columns:repeat(2,minmax(100px,1fr))}}",
+			".tm_stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:8px;padding:10px 14px;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.13))}.tm_stat{min-width:0;padding:9px 10px;border-radius:8px;background:var(--dsw-alias-bg-layer-1,rgba(128,128,128,.07));border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.15))}.tm_stat_value{font-size:18px;font-weight:700;line-height:1.2}.tm_stat_label{margin-top:3px;font-size:11px;color:var(--dsw-alias-label-secondary,#9097a4)}@media(max-width:720px){.tm_stats{grid-template-columns:repeat(2,minmax(100px,1fr))}}",
 			".tm_token{display:inline-flex;align-items:center;margin-left:6px;padding:1px 6px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.22));border-radius:999px;background:var(--dsw-alias-bg-layer-1,rgba(128,128,128,.09));font:600 10px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--dsw-alias-label-secondary,#9097a4);white-space:nowrap;vertical-align:middle}.tm_tool>.tm_token{margin-left:auto;flex:0 0 auto}.tm_stat_extra{margin-top:2px;font-size:10px;color:var(--dsw-alias-label-secondary,#9097a4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
 			".tm_help{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;margin-left:6px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));border-radius:50%;background:var(--dsw-alias-bg-layer-1,rgba(128,128,128,.08));color:var(--dsw-alias-label-secondary,#9097a4);font:700 10px/1 ui-sans-serif,system-ui,sans-serif;cursor:help;vertical-align:middle;outline:none}.tm_help:hover,.tm_help:focus-visible{border-color:#7c8cff;color:#9da8ff}.tm_help::after{content:attr(data-tip);position:absolute;left:0;top:calc(100% + 6px);width:min(520px,calc(100vw - 48px));max-width:100%;padding:10px 12px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));border-radius:9px;background:var(--dsw-alias-bg-base,#17191d);box-shadow:0 14px 40px rgba(0,0,0,.35);color:var(--dsw-alias-label-primary,#e7e9ed);font:400 12px/1.65 ui-sans-serif,system-ui,sans-serif;white-space:pre-line;text-align:left;opacity:0;visibility:hidden;pointer-events:none;z-index:30;transition:opacity .12s ease}.tm_help:hover::after,.tm_help:focus-visible::after{opacity:1;visibility:visible}",
-			".tm_badge{display:inline-block;margin-left:6px;padding:2px 7px;border:1px solid transparent;border-radius:999px;font-size:10px;font-weight:700;line-height:1.35;letter-spacing:.02em;vertical-align:middle;color:#fff}.tm_badge.off{background:#b42318;border-color:#d92d20;color:#fff}.tm_badge.cold{background:#4338ca;border-color:#6366f1;color:#fff}.tm_badge.live{background:#15803d;border-color:#22c55e;color:#fff}",
+			".tm_badge{display:inline-block;margin-left:6px;padding:2px 7px;border:1px solid transparent;border-radius:999px;font-size:10px;font-weight:700;line-height:1.35;letter-spacing:.02em;vertical-align:middle;color:#fff}.tm_badge.off{background:#b42318;border-color:#d92d20;color:#fff}.tm_badge.cold{background:#4338ca;border-color:#6366f1;color:#fff}.tm_badge.live{background:#15803d;border-color:#22c55e;color:#fff}.tm_badge.ptc{background:#6d28d9;border-color:#a78bfa;color:#fff}.tm_badge.native{background:#334155;border-color:#64748b;color:#fff}",
 			".tm_group{border-bottom:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.13))}.tm_group:last-child{border-bottom:0}",
 			".tm_group_bar{display:flex;align-items:center;gap:8px;padding:11px 14px}",
 			".tm_chevron{appearance:none;border:0;background:transparent;color:inherit;width:28px;height:28px;border-radius:7px;cursor:pointer;font:16px/1 inherit;flex:0 0 auto}.tm_chevron:hover{background:var(--dsw-alias-bg-layer-1,rgba(128,128,128,.1))}",
@@ -229,11 +229,17 @@ window.__ModuleLoader__.load({
 				+ (group.description ? ": " + escapeCatalogText(group.description) : "");
 			return heading + "\n  Tools: " + members.map((tool) => escapeCatalogText(tool.name)).join(", ");
 		}
+		// A snapshot priced by the running transport carries the per-tool number;
+		// the JSON projection is what remains for a native preset or a draft row.
+		function toolTokens(tool) {
+			if (typeof tool.tokens === "number" && Number.isFinite(tool.tokens)) return tool.tokens;
+			return estimateToolTokens(tool);
+		}
 		function estimateGroupTokens(group, members) {
 			if (members.length === 0) return { schema: 0, catalog: 0, net: 0 };
 			let schema = 0;
 			for (const tool of members) {
-				const tokens = estimateToolTokens(tool);
+				const tokens = toolTokens(tool);
 				if (tokens === null) return null;
 				schema += tokens;
 			}
@@ -268,16 +274,24 @@ window.__ModuleLoader__.load({
 					onDemandSavings += tokens.net;
 				}
 			}
+			// A transport that renders one document (PTC) is priced per tool plus a
+			// fixed floor; the JSON projection prices whole arrays by itself.
+			const additive = preset.transport === "ptc";
+			const resident = (list) => list.reduce((sum, tool) => {
+				const tokens = toolTokens(tool);
+				return sum + (typeof tokens === "number" ? tokens : 0);
+			}, 0);
+			const constantTokens = typeof preset.constantTokens === "number" && Number.isFinite(preset.constantTokens) ? preset.constantTokens : 0;
 			return {
-				totalTokens: estimateToolsTokens(allTools),
+				totalTokens: additive ? resident(allTools) + constantTokens : estimateToolsTokens(allTools),
 				alwaysOnTools: alwaysOn.length,
-				alwaysOnTokens: estimateToolsTokens(alwaysOn),
+				alwaysOnTokens: additive ? resident(alwaysOn) : estimateToolsTokens(alwaysOn),
 				onDemandTools: onDemand.length,
 				onDemandTokens,
 				onDemandGroups: active.length,
 				onDemandSavings,
 				disabledTools: disabledTools.length,
-				disabledTokens: estimateToolsTokens(disabledTools),
+				disabledTokens: additive ? resident(disabledTools) : estimateToolsTokens(disabledTools),
 			};
 		}
 		function groupTokenEstimates(preset) {
@@ -815,6 +829,9 @@ window.__ModuleLoader__.load({
 			const stats = catalogStats(preset);
 			const tokenStats = presetTokenStats(preset);
 			const onDemandCatalogTokens = Math.max(0, tokenStats.onDemandTokens - tokenStats.onDemandSavings);
+			const isPtc = preset.transport === "ptc";
+			const unitNote = isPtc ? "PTC SDK 文本 ÷4" : "工具 JSON ÷4";
+			const constantTokens = typeof preset.constantTokens === "number" && Number.isFinite(preset.constantTokens) ? preset.constantTokens : 0;
 			const groupTokens = groupTokenEstimates(preset);
 			const presetPolicy = preset.policy || { disabled: [], groups: [] };
 			const hasPresetConfig = !preset.broken
@@ -892,17 +909,17 @@ window.__ModuleLoader__.load({
 							h("div", { className: "tm_group_title" }, title, h("span", { className: "tm_badge cold" }, "按需")),
 							h("div", { className: "tm_group_sub" }, group.description || "没有描述"),
 						),
-						estimate && estimate.schema > 0 ? tokenBadge(estimate.net, "估算（4 字符/token）：组内工具 schema " + formatTokenAmount(estimate.schema) + " tok · 关闭时目录行 " + formatTokenAmount(estimate.catalog) + " tok · 收起净省 " + formatTokenAmount(estimate.net) + " tok/轮") : null,
+						estimate && estimate.schema > 0 ? tokenBadge(estimate.net, "估算（" + unitNote + "）：组内工具 " + formatTokenAmount(estimate.schema) + " tok · 关闭时目录行 " + formatTokenAmount(estimate.catalog) + " tok · 收起净省 " + formatTokenAmount(estimate.net) + " tok/轮") : null,
 						h("span", { className: "tm_group_count" }, members.length + " 个工具"),
 						h("button", { className: "tm_btn", onClick: () => openEdit(group) }, "编辑"),
 						h("button", { className: "tm_btn", onClick: () => deleteGroup(key) }, "删除"),
 					),
 					open ? h("div", { className: "tm_group_body" }, members.length
 						? members.map((tool) => {
-							const tokens = estimateToolTokens(tool);
+							const tokens = toolTokens(tool);
 							const isDisabled = disabled.has(tool.name);
 							return h("div", { className: "tm_member", key: tool.name },
-								h("div", { className: "tm_tool_name" }, tool.name, isDisabled ? h("span", { className: "tm_badge off" }, "关闭") : null, tokenBadge(tokens, isDisabled ? "估算（4 字符/token）：已关闭，开启后常驻 " + formatTokenAmount(tokens) + " tok/轮" : "估算（4 字符/token）：单工具常驻 " + formatTokenAmount(tokens) + " tok/轮")),
+								h("div", { className: "tm_tool_name" }, tool.name, isDisabled ? h("span", { className: "tm_badge off" }, "关闭") : null, tokenBadge(tokens, "估算（" + unitNote + "）：" + (isDisabled ? "已关闭，开启后常驻 " : "单工具常驻 ") + formatTokenAmount(tokens) + " tok/轮")),
 								h("div", { className: "tm_tool_desc", title: tool.description }, tool.description),
 							);
 						})
@@ -913,7 +930,7 @@ window.__ModuleLoader__.load({
 
 			function renderTool(tool) {
 				const enabled = !disabled.has(tool.name);
-				const tokens = estimateToolTokens(tool);
+				const tokens = toolTokens(tool);
 				return h("label", { className: "tm_tool", key: tool.name },
 					h("input", { type: "checkbox", checked: enabled, onChange: () => toggleTool(tool.name) }),
 					h("span", null,
@@ -922,7 +939,7 @@ window.__ModuleLoader__.load({
 						),
 						h("div", { className: "tm_tool_desc", title: tool.description }, tool.description),
 					),
-					tokenBadge(tokens, enabled ? "估算（4 字符/token）：单工具常驻 " + formatTokenAmount(tokens) + " tok/轮" : "估算（4 字符/token）：已关闭，开启后常驻 " + formatTokenAmount(tokens) + " tok/轮"),
+					tokenBadge(tokens, "估算（" + unitNote + "）：" + (enabled ? "单工具常驻 " : "已关闭，开启后常驻 ") + formatTokenAmount(tokens) + " tok/轮"),
 				);
 			}
 
@@ -1262,6 +1279,10 @@ window.__ModuleLoader__.load({
 							onChange: (event) => { setActive(event.target.value); setQuery(""); setFilter("all"); setModal(null); setAutoPreview(null); setCopyDialog(null); setAutoGroupError(""); setExpanded({}); },
 						}, draft.presets.map((item) => h("option", { key: item.id, value: item.id }, (item.name || item.id) + " · " + (item.tools || []).length + " 个工具" + (item.isDefault ? " · 默认" : "") + (item.trust === "user" ? " · 用户" : "")))),
 					),
+					preset.broken ? null
+						: isPtc
+							? h("span", { className: "tm_badge ptc", title: "本 Preset 走 PTC：工具以一份生成的 TypeScript SDK 注入系统提示词，token 按该文本 ÷4 估算（含 run_code 调用声明、PTC 指令段与 SDK 脚手架）" }, "PTC")
+							: h("span", { className: "tm_badge native", title: "本 Preset 走原生 tool-calling：工具以 JSON schema 随请求发送，token 按 JSON ÷4 估算" }, "原生"),
 				),
 				preset.broken ? h("div", { className: "tm_error" }, preset.broken) : null,
 				autoGroupError ? h("div", { className: "tm_error" }, autoGroupError) : null,
@@ -1293,11 +1314,14 @@ window.__ModuleLoader__.load({
 					),
 					h("div", { className: "tm_stats" },
 						[
-							["工具总量", stats.totalTools, formatTokenAmount(tokenStats.totalTokens) + " tok", "全部 " + stats.totalTools + " 个工具 schema 合计 " + formatTokenAmount(tokenStats.totalTokens) + " tok/轮（全部常驻时）"],
-							["分组数量", stats.groupCount, "省 " + formatTokenAmount(tokenStats.onDemandSavings) + " tok", "全部 " + tokenStats.onDemandGroups + " 个按需组收起：工具 schema 合计 " + formatTokenAmount(tokenStats.onDemandTokens) + " tok − 关闭态目录行 " + formatTokenAmount(onDemandCatalogTokens) + " tok = 净省 " + formatTokenAmount(tokenStats.onDemandSavings) + " tok/轮"],
+							["工具总量", stats.totalTools, formatTokenAmount(tokenStats.totalTokens) + " tok", "全部 " + stats.totalTools + " 个工具合计 " + formatTokenAmount(tokenStats.totalTokens) + " tok/轮（" + unitNote + (isPtc ? "，含平台常数 " + formatTokenAmount(constantTokens) + " tok" : "") + "；全部常驻时）"],
+							["分组数量", stats.groupCount, "省 " + formatTokenAmount(tokenStats.onDemandSavings) + " tok", "全部 " + tokenStats.onDemandGroups + " 个按需组收起：组内工具合计 " + formatTokenAmount(tokenStats.onDemandTokens) + " tok − 关闭态目录行 " + formatTokenAmount(onDemandCatalogTokens) + " tok = 净省 " + formatTokenAmount(tokenStats.onDemandSavings) + " tok/轮"],
 							["未分组工具", stats.ungroupedTools, formatTokenAmount(tokenStats.alwaysOnTokens) + " tok", "未分组且未关闭的 " + tokenStats.alwaysOnTools + " 个工具每轮常驻 " + formatTokenAmount(tokenStats.alwaysOnTokens) + " tok"],
-							["按需工具", stats.onDemandTools, formatTokenAmount(tokenStats.onDemandTokens) + " tok", "按需组内 " + tokenStats.onDemandTools + " 个工具 schema 合计 " + formatTokenAmount(tokenStats.onDemandTokens) + " tok；收起后仍会注入目录行 " + formatTokenAmount(onDemandCatalogTokens) + " tok，实际净省见「分组数量」卡"],
+							["按需工具", stats.onDemandTools, formatTokenAmount(tokenStats.onDemandTokens) + " tok", "按需组内 " + tokenStats.onDemandTools + " 个工具合计 " + formatTokenAmount(tokenStats.onDemandTokens) + " tok；收起后仍会注入目录行 " + formatTokenAmount(onDemandCatalogTokens) + " tok，实际净省见「分组数量」卡"],
 							["已关闭工具", stats.disabledTools, formatTokenAmount(tokenStats.disabledTokens) + " tok", "已关闭的 " + tokenStats.disabledTools + " 个工具关闭可省 " + formatTokenAmount(tokenStats.disabledTokens) + " tok/轮"],
+							...(isPtc
+								? [["平台常数", formatTokenAmount(constantTokens), "固定/轮", "每轮与工具选择无关的固定开销 " + formatTokenAmount(constantTokens) + " tok：run_code 调用声明、PTC 指令段、SDK 渲染脚手架与目录工具（tool_list）等。收起或关闭工具都省不掉它"]]
+								: []),
 						].map(([label, value, extra, title]) =>
 							h("div", { className: "tm_stat", key: label }, h("div", { className: "tm_stat_value" }, value), h("div", { className: "tm_stat_label" }, label), h("div", { className: "tm_stat_extra", title }, extra)),
 						),

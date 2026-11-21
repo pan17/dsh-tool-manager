@@ -17,7 +17,16 @@ export interface ToolCatalogStats {
   disabledTools: number;
 }
 
-type TokenSchema = Pick<ToolSchemaView, "name" | "description" | "parameters">;
+type TokenSchema = Pick<ToolSchemaView, "name" | "description" | "parameters"> & {
+  /** Resident tokens supplied by a snapshot's transport-aware measurement. */
+  tokens?: number;
+};
+
+/** How the written transcript prices a Preset: the JSON projection, or a rendered SDK. */
+export interface TokenPricing {
+  /** Tokens no toggle can remove; see `PresetCatalogView.constantTokens`. */
+  constantTokens: number;
+}
 
 /**
  * DSH's own estimator: 4 characters per token, measured over the exact tool
@@ -53,7 +62,7 @@ export function estimateGroupTokens(
   let schema = 0;
   for (const name of group.tools) {
     const tool = byName.get(name);
-    if (tool) schema += estimateToolTokens(tool);
+    if (tool) schema += residentTokens(tool);
   }
   const catalog = Math.ceil(renderCatalogLine({
     name: group.name,
@@ -63,10 +72,27 @@ export function estimateGroupTokens(
   return { schema, catalog, net: schema - catalog };
 }
 
-/** Preset-level summary used by the settings page and API consumers. */
+/**
+ * One tool's resident cost: the transport's marginal measurement when the
+ * snapshot carries one, else the Host's JSON projection.
+ */
+function residentTokens(tool: TokenSchema): number {
+  return typeof tool.tokens === "number" ? tool.tokens : estimateToolTokens(tool);
+}
+
+/**
+ * Preset-level summary used by the settings page and API consumers.
+ *
+ * @param tools - the Preset's visible tools, in catalog order.
+ * @param policy - its disabled tools and on-demand groups.
+ * @param pricing - present when the transport prices rendered text: sums then
+ * follow the per-tool marginals and add the fixed floor, because an array-wide
+ * JSON projection cannot describe a document rendered as one string.
+ */
 export function presetTokenStats(
   tools: readonly TokenSchema[],
   policy: PresetToolPolicy,
+  pricing?: TokenPricing,
 ): PresetTokenStats {
   const active = resolveActiveGroups(policy, tools.map((tool) => tool.name));
   const claimed = new Set<string>();
@@ -85,16 +111,20 @@ export function presetTokenStats(
     onDemandSavings += estimate.net;
   }
 
+  const bucketTokens = (list: readonly TokenSchema[]): number => pricing === undefined
+    ? estimateToolsTokens(list)
+    : list.reduce((sum, tool) => sum + residentTokens(tool), 0);
+
   return {
-    totalTokens: estimateToolsTokens(tools),
+    totalTokens: pricing === undefined ? estimateToolsTokens(tools) : bucketTokens(tools) + pricing.constantTokens,
     alwaysOnTools: alwaysOn.length,
-    alwaysOnTokens: estimateToolsTokens(alwaysOn),
+    alwaysOnTokens: bucketTokens(alwaysOn),
     onDemandTools: onDemand.length,
     onDemandTokens,
     onDemandGroups: active.length,
     onDemandSavings,
     disabledTools: disabledTools.length,
-    disabledTokens: estimateToolsTokens(disabledTools),
+    disabledTokens: bucketTokens(disabledTools),
   };
 }
 

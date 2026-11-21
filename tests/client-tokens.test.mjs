@@ -91,6 +91,26 @@ describe("client token estimates", () => {
     );
   });
 
+  it("keeps a PTC summary identical to the Host additive estimator", () => {
+    const tools = [
+      schema("read", "Read a file"),
+      schema("web_search", "Search the web"),
+      schema("web_fetch", "Fetch a page"),
+      schema("old", "Old tool"),
+    ].map((tool, index) => ({ ...tool, tokens: 100 + index * 37 }));
+    const policy = {
+      disabled: ["old"],
+      groups: [{ name: "Web", description: "Web tools", patterns: ["web_*"] }],
+    };
+    const value = { id: "standard", tools, policy, transport: "ptc", constantTokens: 321 };
+
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(client.presetTokenStats(value))),
+      JSON.parse(JSON.stringify(hostPresetTokenStats(tools, policy, { constantTokens: 321 }))),
+    );
+    assert.equal(client.presetTokenStats(value).totalTokens, 100 + 137 + 174 + 211 + 321);
+  });
+
   it("keeps the client summary identical to the Host estimator", () => {
     const tools = [
       schema("read", "Read a file"),

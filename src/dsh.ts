@@ -36,6 +36,13 @@ export interface ToolSchemaLike {
 
 export interface ToolRuntimeLike {
   schemas(scope?: unknown): ToolSchemaLike[];
+  /**
+   * Raw visible definitions, including the `output` schema that `schemas()`
+   * projects away. Absent on a Host older than the PTC transport.
+   */
+  definitions?(scope?: unknown): readonly unknown[];
+  /** The executor this scope runs; its SDK renderer is what a PTC request reads. */
+  selectExecutor?(scope?: unknown): unknown;
   register(definition: unknown): () => void;
   restrict(filter: { deny: string[] }): () => void;
   guard?(guard: (execution: { name: string }) => string | undefined): () => void;
@@ -171,16 +178,25 @@ export function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value as Record<string, unknown>;
 }
 
+/** Read through one preset's revision lease and always release it. */
+export async function readPresetScope<T>(
+  presets: AgentPresetsLike,
+  id: string | undefined,
+  read: (scope: unknown) => T,
+): Promise<T> {
+  const lease = await presets.acquireScope(id);
+  try {
+    return read(lease.key);
+  } finally {
+    await lease[Symbol.asyncDispose]();
+  }
+}
+
 /** Read one preset's standing schemas and always release the revision lease. */
-export async function schemasForPreset(
+export function schemasForPreset(
   presets: AgentPresetsLike,
   tools: ToolRuntimeLike,
   id?: string,
 ): Promise<ToolSchemaLike[]> {
-  const lease = await presets.acquireScope(id);
-  try {
-    return tools.schemas(lease.key);
-  } finally {
-    await lease[Symbol.asyncDispose]();
-  }
+  return readPresetScope(presets, id, (scope) => tools.schemas(scope));
 }

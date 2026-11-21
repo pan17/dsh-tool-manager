@@ -33,6 +33,13 @@ export interface ToolSchemaView {
   tokens?: number;
 }
 
+/**
+ * How a preset's tools reach the model: `native` sends JSON tool schemas in the
+ * request's `tools` array, `ptc` sends one `run_code` tool plus a rendered SDK
+ * document in the system prompt. The two are measured on different text.
+ */
+export type ToolTokenTransport = "native" | "ptc";
+
 export interface ToolTokenEstimate {
   /** Sum of the group's active member tool schemas. */
   schema: number;
@@ -78,6 +85,14 @@ export interface PresetCatalogView {
   groups: ResolvedGroupView[];
   orphans: PresetOrphans;
   tokenStats?: PresetTokenStats;
+  /** Where `tokens` comes from; absent on a Preset priced by the JSON projection. */
+  transport?: ToolTokenTransport;
+  /**
+   * Tokens every request pays whatever the tools are set to: the transport call,
+   * the executor's instructions, and tools the editor never lists. Present only
+   * for a transport that renders text as a whole (PTC).
+   */
+  constantTokens?: number;
 }
 
 export interface ToolManagerSnapshot {
