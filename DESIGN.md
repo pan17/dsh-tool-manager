@@ -194,6 +194,23 @@ interface ToolManagerSettings {
 - WebUI 和 Host 保存接口都禁止保存空组。旧配置中的空组或冲突组仍会在设置页中标为无效，供用户修复或删除；
 - 保存校验与设置页必须读**同一份**工具目录：standing composition 与 Agent 作用域注册（探针 + 运行中 Agent 观测）的并集。只读 standing 会把 `@deepseek-ai/dsh-schedule` 注入每个 root Agent 的 `schedule_*`、以及 `modelSelectionSettings` 注入的 `subagent` 判成不存在，从而拒绝一个页面能列出、运行时也能正常打开的组。只有真正读不到 standing composition 时才跳过该校验。
 
+### 3.4 MCP 模式（新增）
+
+`mode: "mcp"` 不是“按组/按工具启用”，而是**按 schema 体积分层**：
+
+- **完整 schema**：`mcp.expose` 白名单里的工具 + `tool_find` + `run_code`；
+- **空壳 schema**：其余所有工具仍然留在步骤工具集里，名称与描述保留，`parameters` 替换为 `{ type: "object", additionalProperties: true }`。模型随时可以直接按名称调用；参数靠 `tool_find` 返回的完整 schema 获知，最终由工具自身的校验兜底。
+
+`tool_find({ query, limit })` 只读：在空壳池里按名称/描述匹配，返回 `{ name, description, parameters }` 的完整 JSON Schema，不改变任何会话状态。
+
+实现落点：
+
+1. `tools.resolve()` 的包装里，mcp 模式不走 `filterStepToolSet`（删名字），而走 `stripStepToolSet`：`hidden`（显式 `disabled` 与 `tool_list`）照旧删除，`stripped` 的 definition 用浅拷贝替换 `description`/`parameters`，`execute`/`timeoutMs`/`presentation` 原样保留。
+2. 不调用 `restrict()`：所有工具都要能被 `executable()` 解析到；`disabled` 由步骤集合与 guard 双重拦截。
+3. `mcpPool` = 被 strip 的工具集合；`tool_find` 命中后模型直接用原名调用，不需要任何状态变更。
+4. 空壳 schema 是合法 JSON Schema（`additionalProperties: true`），模型传任意参数都能进入工具自身校验；错误信息由原工具返回。
+5. 元工具只在至少一个 Preset 处于 mcp 模式时注册；切回组模式即恢复原有过滤。
+
 ## 4. 关键实现陷阱
 
 ### 4.1 不要只过滤 prompt schema

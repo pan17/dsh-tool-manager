@@ -5,3 +5,6 @@ dist/
 .playwright-cli/
 .tmp/
 .DS_Store
+.codegraph/
+.npm-cache/
+.dsh-temp/
