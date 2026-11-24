@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Tool Manager",
-    "description": "Manage DSH agent tools per preset, open on-demand tool groups, and estimate their resident token cost"
+    "description": "Manage DSH agent tools per preset with on-demand groups or MCP-style tool_find loading, and estimate their resident token cost"
   }
 }

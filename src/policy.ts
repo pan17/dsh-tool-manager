@@ -1,5 +1,6 @@
 import {
   DISCOVERY_TOOL_NAME,
+  MCP_FIND_TOOL_NAME,
   PTC_TRANSPORT_NAME,
   type PresetOrphans,
   type PresetToolPolicy,
@@ -47,7 +48,17 @@ export function normalizePresetPolicy(value: unknown): PresetToolPolicy {
     });
   }
 
-  return { disabled, groups };
+  const mode = record?.mode === "mcp" ? "mcp" as const : undefined;
+  return {
+    disabled,
+    groups,
+    ...(mode === undefined ? {} : { mode }),
+  };
+}
+
+/** Whether this preset loads tools MCP-style instead of by on-demand groups. */
+export function isMcpMode(policy: PresetToolPolicy): boolean {
+  return policy.mode === "mcp";
 }
 
 export function policyFor(
@@ -147,6 +158,7 @@ export function denyNames(
   toolNames: readonly string[],
   exposures: ReadonlySet<string>,
 ): string[] {
+  if (isMcpMode(policy)) return mcpDenyNames(policy, toolNames);
   const groups = resolveActiveGroups(policy, toolNames);
   const hidden = new Set<string>();
   const open = new Set([...exposures].map((name) => name.toLowerCase()));
@@ -162,7 +174,57 @@ export function denyNames(
   hidden.delete(PTC_TRANSPORT_NAME);
   if (groups.length > 0) hidden.delete(DISCOVERY_TOOL_NAME);
   else if (toolNames.includes(DISCOVERY_TOOL_NAME)) hidden.add(DISCOVERY_TOOL_NAME);
+  // `tool_find` is registered globally as soon as ANY preset runs mcp mode. A
+  // groups-mode preset must never see it: the finder belongs to mcp mode.
+  if (toolNames.includes(MCP_FIND_TOOL_NAME)) hidden.add(MCP_FIND_TOOL_NAME);
   return toolNames.filter((name) => hidden.has(name));
+}
+
+function mcpDenyNames(
+  policy: PresetToolPolicy,
+  toolNames: readonly string[],
+): string[] {
+  const disabled = new Set(policy.disabled);
+  const hidden: string[] = [];
+  for (const name of toolNames) {
+    if (name === PTC_TRANSPORT_NAME) continue;
+    // In mcp mode every registered tool stays in the tool set and callable;
+    // only explicit disables and the inert group opener are removed outright.
+    if (disabled.has(name) || name === DISCOVERY_TOOL_NAME) hidden.push(name);
+  }
+  return hidden;
+}
+
+/**
+ * Tools hidden behind their group in mcp mode.
+ *
+ * A grouped tool is not declared at all: the model sees the group in the
+ * catalog and reads every member's schema with `tool_find({ group })`. The
+ * registration itself is untouched, so the tool stays directly callable.
+ */
+export function mcpGroupedNames(
+  policy: PresetToolPolicy,
+  toolNames: readonly string[],
+): string[] {
+  if (!isMcpMode(policy)) return [];
+  const disabled = new Set(policy.disabled);
+  const grouped: string[] = [];
+  for (const group of resolveActiveGroups(policy, toolNames)) {
+    for (const name of group.tools) {
+      if (disabled.has(name)) continue;
+      grouped.push(name);
+    }
+  }
+  return grouped;
+}
+
+/** The on-demand groups an mcp-mode preset exposes in its catalog. */
+export function mcpGroups(
+  policy: PresetToolPolicy,
+  toolNames: readonly string[],
+): ResolvedGroupView[] {
+  if (!isMcpMode(policy)) return [];
+  return resolveActiveGroups(policy, toolNames);
 }
 
 export function emptyGroupNames(

@@ -5,6 +5,7 @@ import { estimateGroupTokens, estimateToolTokens, presetTokenStats } from "./sta
 import { measurePresetTokens, type TokenModel } from "./transport.js";
 import {
   DISCOVERY_TOOL_NAME,
+  MCP_FIND_TOOL_NAME,
   PTC_TRANSPORT_NAME,
   type PresetCatalogView,
   type ToolManagerSettings,
@@ -36,7 +37,11 @@ export async function buildSnapshot(
         model = read.model;
         const observed = observedSchemas?.(composition.id) ?? [];
         schemas = mergeSchemas(read.schemas, observed)
-          .filter((schema) => schema.name !== DISCOVERY_TOOL_NAME && schema.name !== PTC_TRANSPORT_NAME)
+          .filter((schema) => (
+            schema.name !== DISCOVERY_TOOL_NAME
+            && schema.name !== PTC_TRANSPORT_NAME
+            && schema.name !== MCP_FIND_TOOL_NAME
+          ))
           .map(projectSchema);
       } catch (error) {
         broken = error instanceof Error ? error.message : String(error);

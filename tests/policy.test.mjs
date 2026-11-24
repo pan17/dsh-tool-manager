@@ -192,4 +192,33 @@ describe("tool-manager policy", () => {
     assert.deepEqual([...(parseKnownRestrictable(error) ?? [])], ["read", "write"]);
     assert.equal(parseKnownRestrictable(new Error("boom")), undefined);
   });
+
+  it("drops the inert mcp.expose field and keeps the mode", () => {
+    assert.deepEqual(normalizeSettings({
+      presets: {
+        standard: {
+          disabled: [],
+          groups: [{ name: "Web", patterns: ["web_*"] }],
+          mode: "mcp",
+          mcp: { expose: ["read", "read", "grep", 7] },
+        },
+      },
+    }), {
+      presets: {
+        standard: {
+          disabled: [],
+          groups: [{ name: "Web", patterns: ["web_*"] }],
+          mode: "mcp",
+        },
+      },
+    });
+  });
+
+  it("no longer force-hides the retired tool_open name", () => {
+    assert.deepEqual(denyNames(
+      { disabled: [], groups: [] },
+      ["read", "tool_open"],
+      new Set(),
+    ), []);
+  });
 });

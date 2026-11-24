@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "工具管理",
-    "description": "按 Agent Preset 开关工具，把低频工具放进按需组，并估算工具与工具组的常驻 token 成本"
+    "description": "按 Agent Preset 开关工具，把低频工具放进按需组或切成 MCP 按需加载，并估算工具与工具组的常驻 token 成本"
   }
 }

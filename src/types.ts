@@ -1,5 +1,7 @@
 export const DISCOVERY_TOOL_NAME = "tool_list";
 export const PTC_TRANSPORT_NAME = "run_code";
+/** MCP-style discovery tool: search the hidden pool without changing the declaration set. */
+export const MCP_FIND_TOOL_NAME = "tool_find";
 /** One durable internal Session shared by every cold-Preset schema probe. */
 export const TOOL_MANAGER_PROBE_SESSION_ID = "tool-manager-probe-internal-v1";
 
@@ -19,6 +21,8 @@ export interface PresetToolPolicy {
   disabled: string[];
   /** On-demand groups hidden until exposed with tool_list. */
   groups: ToolGroupPolicy[];
+  /** Tool-loading mode; absent means the historical "groups" mode. */
+  mode?: "groups" | "mcp";
 }
 
 export interface ToolManagerSettings {

@@ -86,7 +86,7 @@ window.__ModuleLoader__.load({
 			return next;
 		}
 		function policyPayload(policy) {
-			return {
+			const payload = {
 				disabled: [...(policy.disabled || [])],
 				groups: (policy.groups || []).map((group) => ({
 					name: group.name,
@@ -94,6 +94,8 @@ window.__ModuleLoader__.load({
 					patterns: [...(group.patterns || [])],
 				})),
 			};
+			if (policy.mode === "mcp") payload.mode = "mcp";
+			return payload;
 		}
 		/**
 		 * Project one Preset's whole policy onto another Preset.
@@ -141,6 +143,38 @@ window.__ModuleLoader__.load({
 		}
 		function settingsSignature(value) {
 			return JSON.stringify(settingsPayload(value));
+		}
+		/**
+		 * Why the save button cannot run, or null when it can.
+		 *
+		 * The button is disabled in four different situations and used to look
+		 * identical in all of them, so a click that did nothing was
+		 * indistinguishable from a click that saved. Order matters: the
+		 * read-only config comes first because waiting never fixes it, while
+		 * the other two clear themselves.
+		 */
+		function saveBlockReason(state) {
+			if (!state || state.writable !== true) return "当前配置文件不可写，不能保存。";
+			if (state.busy) return "正在处理上一个请求，请稍后再保存。";
+			if (state.autoGrouping) return "自动分组正在进行，请等它结束后再保存。";
+			if (!state.dirty) return "没有需要保存的修改。";
+			return null;
+		}
+		/**
+		 * The Preset a save error blames, or null when it blames none.
+		 *
+		 * Both validation paths quote the id inside curly quotes: the page uses
+		 * “id” and the server uses "id". Only a quoted run that is exactly one of
+		 * the known ids counts, so a quoted group or tool name is not mistaken
+		 * for a Preset.
+		 */
+		function errorPresetId(message, presetIds) {
+			if (typeof message !== "string" || message === "") return null;
+			const known = new Set(presetIds || []);
+			for (const match of message.matchAll(/[\u201c"]([^\u201d"]+)[\u201d"]/g)) {
+				if (known.has(match[1])) return match[1];
+			}
+			return null;
 		}
 		function matchesPattern(value, pattern) {
 			if (!pattern.includes("*")) return value === pattern;
@@ -416,6 +450,25 @@ window.__ModuleLoader__.load({
 			"tool_list 只在当前 Preset 有有效按需组时才出现（保存后从下一个模型步骤生效），没有有效按需组时模型看不到它；它由插件自动管理，不出现在本页工具目录中，也不能在这里开关或分组。",
 		].join("\n");
 
+		// MCP mode replaces the group opener with tool_find, so the same two
+		// paragraphs have to name the other tool. The header keeps one help
+		// entry point and picks the wording from the preset loading mode.
+		const TOOL_CATALOG_HELP_MCP = [
+			"关掉后立刻对模型隐藏。按需组只声明组名与描述，组内工具不单独声明；模型用 tool_find 读取整组用法后可直接按名调用，不需要开组。",
+			"",
+			"tool_find 由插件自动注册，不出现在本页目录中，也不能在这里开关或分组；它只在当前 Preset 有有效按需组时出现。",
+		].join("\n");
+
+		function toolCatalogHelp(mcpMode) {
+			return mcpMode ? TOOL_CATALOG_HELP_MCP : TOOL_CATALOG_HELP;
+		}
+
+		// One short hover line per mode. The chips carry the explanation now:
+		// the row used to print a paragraph beside them, which pushed the chips
+		// around and repeated what the tool catalog help already says.
+		const GROUP_CHIP_TITLE = "组内工具平时不声明；模型用 tool_list({ group }) 打开一组后，这组工具才进入工具表。";
+		const MCP_CHIP_TITLE = "组内工具始终不进工具表；模型用 tool_find({ group }) 看整组参数，随时能按名字直接调用。";
+
 		function ToolManagerSection() {
 			const [snapshot, setSnapshot] = react.useState(null);
 			const [draft, setDraft] = react.useState(null);
@@ -497,6 +550,16 @@ window.__ModuleLoader__.load({
 					const disabled = new Set(target.policy.disabled || []);
 					if (disabled.has(name)) disabled.delete(name); else disabled.add(name);
 					target.policy.disabled = [...disabled];
+				});
+			}
+
+			function setMode(mode) {
+				mutatePreset((target) => {
+					if (mode === "mcp") {
+						target.policy.mode = "mcp";
+					} else {
+						delete target.policy.mode;
+					}
 				});
 			}
 
@@ -792,6 +855,9 @@ window.__ModuleLoader__.load({
 			function save() {
 				for (const item of draft.presets || []) {
 					if (item.broken) continue;
+					// Groups are inert in mcp mode, so a stale/empty group must not
+					// block saving the mode switch.
+					if (item.policy.mode === "mcp") continue;
 					const issues = groupDraftIssues(item);
 					if (issues.disabledMembers.length) {
 						const issue = issues.disabledMembers[0];
@@ -825,6 +891,9 @@ window.__ModuleLoader__.load({
 
 			const disabled = new Set(preset.policy.disabled || []);
 			const grouped = groupedNames(preset);
+			const mcpMode = preset.policy.mode === "mcp";
+			const saveBlocked = saveBlockReason({ busy, autoGrouping, writable: draft.writable, dirty });
+			const errorPreset = errorPresetId(error, (draft.presets || []).map((item) => item.id));
 			const autoGroupCandidates = (preset.tools || []).filter((tool) => !disabled.has(tool.name) && !grouped.has(tool.name));
 			const stats = catalogStats(preset);
 			const tokenStats = presetTokenStats(preset);
@@ -848,8 +917,8 @@ window.__ModuleLoader__.load({
 			});
 			const showGroups = filter === "all" || filter === "cold";
 			const visibleTools = (preset.tools || []).filter((tool) => {
-				if (filter === "cold") return false;
 				if (!matchesQuery(tool, needle)) return false;
+				if (filter === "cold") return false;
 				if (filter === "disabled") return disabled.has(tool.name);
 				if (filter === "live") return !disabled.has(tool.name) && !grouped.has(tool.name);
 				return !grouped.has(tool.name);
@@ -1260,12 +1329,24 @@ window.__ModuleLoader__.load({
 					h("div", null, h("h2", null, "Agent 工具管理"), h("div", { className: "tm_muted" }, "按每个 Agent 预设开关工具。点「手动分组」把不常用的收进按需组：平时模型看不到，需要时先查目录再打开。")),
 					h("div", { className: "tm_row" },
 						h("button", { className: "tm_btn", onClick: reload, disabled: busy || autoGrouping }, "刷新"),
-						h("button", { className: "tm_btn primary", onClick: save, disabled: busy || autoGrouping || !draft.writable || !dirty }, busy ? "处理中…" : "保存"),
+						h("button", {
+							className: "tm_btn primary",
+							onClick: save,
+							disabled: saveBlocked !== null,
+							title: saveBlocked || "把当前草稿写入配置文件",
+						}, busy ? "处理中…" : "保存"),
 					),
 				),
 				dirty ? h("div", { className: "tm_notice", role: "status" }, "有未保存的修改。请点击保存；刷新或离开页面前系统会提醒你。") : null,
 				!draft.writable ? h("div", { className: "tm_notice" }, "当前配置文件不可写，不能保存。") : null,
-				error ? h("div", { className: "tm_error" }, error) : null,
+				error ? h("div", { className: "tm_error" },
+					errorPreset && errorPreset !== preset.id
+						? h("div", { className: "tm_row" },
+							h("span", null, "这条错误来自 Preset “", errorPreset, "”，不是当前显示的 “", preset.id, "”。"),
+							h("button", { className: "tm_btn", onClick: () => { setActive(errorPreset); setQuery(""); setFilter("all"); } }, "切换到它"),
+						)
+						: error,
+				) : null,
 				message ? h("div", { className: "tm_notice" }, message) : null,
 				draft.configPath ? h("div", { className: "tm_muted" }, "配置文件：", h("span", { className: "tm_code" }, draft.configPath)) : null,
 				h("div", { className: "tm_preset_picker" },
@@ -1277,19 +1358,24 @@ window.__ModuleLoader__.load({
 							value: preset.id,
 							disabled: autoGrouping,
 							onChange: (event) => { setActive(event.target.value); setQuery(""); setFilter("all"); setModal(null); setAutoPreview(null); setCopyDialog(null); setAutoGroupError(""); setExpanded({}); },
-						}, draft.presets.map((item) => h("option", { key: item.id, value: item.id }, (item.name || item.id) + " · " + (item.tools || []).length + " 个工具" + (item.isDefault ? " · 默认" : "") + (item.trust === "user" ? " · 用户" : "")))),
+						}, draft.presets.map((item) => h("option", { key: item.id, value: item.id }, (item.name || item.id) + " · " + (item.tools || []).length + " 个工具" + (item.isDefault ? " · 默认" : "") + (item.trust === "user" ? " · 用户" : "") + (item.id === errorPreset ? " · 保存失败" : "")))),
 					),
 					preset.broken ? null
 						: isPtc
 							? h("span", { className: "tm_badge ptc", title: "本 Preset 走 PTC：工具以一份生成的 TypeScript SDK 注入系统提示词，token 按该文本 ÷4 估算（含 run_code 调用声明、PTC 指令段与 SDK 脚手架）" }, "PTC")
 							: h("span", { className: "tm_badge native", title: "本 Preset 走原生 tool-calling：工具以 JSON schema 随请求发送，token 按 JSON ÷4 估算" }, "原生"),
 				),
+				h("div", { className: "tm_row", style: { padding: "0 14px 10px" } },
+					h("span", { className: "tm_muted" }, "加载模式"),
+					h("button", { className: "tm_chip" + (mcpMode ? "" : " active"), onClick: () => setMode("groups"), title: GROUP_CHIP_TITLE }, "默认"),
+					h("button", { className: "tm_chip" + (mcpMode ? " active" : ""), onClick: () => setMode("mcp"), title: MCP_CHIP_TITLE }, "MCP 按需"),
+				),
 				preset.broken ? h("div", { className: "tm_error" }, preset.broken) : null,
 				autoGroupError ? h("div", { className: "tm_error" }, autoGroupError) : null,
 				h("section", { className: "tm_panel" },
 					h("div", { className: "tm_panel_head" },
 						h("div", null,
-							h("b", null, "工具目录", h("span", { className: "tm_help", tabIndex: 0, "aria-label": "工具目录说明", "data-tip": TOOL_CATALOG_HELP }, "?")),
+							h("b", null, "工具目录", h("span", { className: "tm_help", tabIndex: 0, "aria-label": "工具目录说明", "data-tip": toolCatalogHelp(mcpMode) }, "?")),
 						),
 						h("div", { className: "tm_row" },
 							h("button", { className: "tm_btn", onClick: startAutoGroup, disabled: autoGrouping || autoGroupCandidates.length === 0, title: autoGroupCandidates.length ? "用默认模型对未分组且未关闭的工具进行聚类" : "没有可自动分组的工具" }, autoGrouping ? "自动分组中…" : "自动分组"),
@@ -1372,6 +1458,11 @@ window.__ModuleLoader__.load({
 		// Pure policy projection, exported for unit tests. DSH only consumes
 		// apply/inject, so this does not widen the client plugin contract.
 		exports.copyPresetPolicy = copyPresetPolicy;
+		// Save-guard projections, exported for unit tests. The button's disabled
+		// state and the error banner both used to hide which Preset or which
+		// condition was involved; these make that answerable without a DOM.
+		exports.saveBlockReason = saveBlockReason;
+		exports.errorPresetId = errorPresetId;
 		exports.estimateToolTokens = estimateToolTokens;
 		exports.estimateToolsTokens = estimateToolsTokens;
 		exports.estimateGroupTokens = estimateGroupTokens;

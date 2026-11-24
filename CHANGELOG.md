@@ -5,6 +5,44 @@
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-11-23
+
+### Added
+
+- **MCP 按需模式现在也支持 PTC 传输**（issue #10 的 PTC 反馈）。PTC 的程序内绑定来自 `tools.schemas(agent, toolSet)`，而渲染给模型的 SDK 文本来自 `tools.definitions(agent, toolSet)`；宿主原本让这两个读取共用一次步骤集合遍历，因此组内工具在 `ReachableView` 里被排除出声明后，在 `run_code` 程序里同样没有绑定，`await tools.名字()` 直接 `TypeError`。现在插件单独包装 `ToolsService.prototype.schemas()`：仅当调用带 `toolSet` 且该 scope 的执行器有 `renderSdk`（即 PTC）时，改读步骤集合的第二面——所有可执行工具的完整 definition，并用宿主自己的 `projectToolSchema` 投影。结果是 SDK 文本里依然没有组内工具（模型照旧用 `tool_find` 取 schema），但每个组内工具都有绑定，参数校验与日志都用真实 schema。宿主里只有 PTC 绑定循环带 `toolSet` 调 `schemas()`，原生路径走 `executable()` → `get()`，所以两种传输下的 MCP 节省都不受影响。
+
+### Fixed
+
+- MCP 模式下设置页把「自动分组 / 手动分组 / 重置配置 / 复制配置」整行一起藏掉了，而 `groups` 恰恰是 MCP 模式唯一的隐藏来源：新建的 Preset 直接切到 MCP 会变成全量声明，页面上也没有任何建组入口。这行现在在两种模式下都显示。
+
+### Removed
+
+- 死字段 `mcp.expose`：设置页会写、服务端会归一化保存，运行时从不读。已删除，旧配置里的 `mcp.expose` 被直接忽略（不迁移、不报错）。
+- 死代码 `MCP_OPEN_TOOL_NAME`（`tool_open`）与 `restoredOpenedToolNames()`：`tool_open` 从未注册成工具，相关引用只是在过滤/隐藏一个不存在的名字；`restoredOpenedToolNames` 没有调用方。
+
+
+## [1.5.0] - 2026-11-22
+
+### Added
+
+- 新增 **MCP 按需加载模式**：每个 Preset 可在设置页把「加载模式」切换到 **MCP 按需**，用与 magpie 等 MCP 服务器相同的形态懒加载工具。
+  - 工具分三档，与按需组同构：**常开**（未分组且未关闭，发送完整参数 schema）、**按需**（在某个组里，只在目录中列出组名与描述）、**已关闭**（不声明）。
+  - 组内工具**不单独声明**，但始终可以直接按原名调用——MCP 模式没有“打开组”这一步；新增元工具 `tool_find({ group })` 只返回整组每个工具的完整参数 schema，不改变任何状态。
+  - 加载提示只在组列表变化时注入一次，其余每个步骤零注入；提示的摘要只覆盖真正渲染的内容，避免 baseline 变化触发重发。
+  - `mcp.expose` 白名单已取消：未分组的工具一律常开。
+- 设置页在 MCP 模式下照常显示按需组卡片，组内工具不在工具列表中重复出现。
+
+### Changed
+
+- 工具声明投影按 `tools.resolve()` 的每步集合实现：迭代只给声明集合，`get()` 仍能命中组内工具——DSH 读声明靠迭代、派发靠按键查找，因此“组替代成员”不需要任何激活步骤。
+
+### Fixed
+
+- MCP 提示的 `source` 缺少 DSH `notice` 表单要求的 `summary`，聊天端会把整个 source 平铺出来，导致组名与描述出现两份。
+- 提示每一步重复注入（实测 34 次，组模式只 1 次）：摘要曾包含 `exposed`/`hidden` 等未渲染字段，baseline 一变化就重发。
+- 保存按钮的禁用状态说不清原因：四种情况（配置只读 / 有请求在跑 / 自动分组中 / 没有改动）都长成同一个灰按钮，点了没反应也报错，页面因此停在草稿态而配置文件没变。现在 `saveBlockReason()` 给出具体原因并挂到按钮 `title`，只读排在最前（等再久也不解决）。
+- 保存失败不指出是哪个 Preset：错误只显示在顶部，`errorPresetId()` 现在从错误文本里认出被点名的 Preset（兼容页面用的弯引号与服务端的直引号），错误框提示「来自哪个 Preset」并给一键切换，Preset 下拉里那一项追加「保存失败」。
+
 ## [1.4.2] - 2026-11-21
 
 ### Changed
