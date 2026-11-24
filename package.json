@@ -1,6 +1,6 @@
 {
   "name": "dsh-tool-manager",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "Manage DSH agent tools per preset with on-demand groups or MCP-style tool_find loading",
   "type": "module",
   "files": [

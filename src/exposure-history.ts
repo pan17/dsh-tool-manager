@@ -1,5 +1,5 @@
 import type { AgentSessionLike, SessionEventLike } from "./dsh.js";
-import { DISCOVERY_TOOL_NAME, MCP_OPEN_TOOL_NAME } from "./types.js";
+import { DISCOVERY_TOOL_NAME } from "./types.js";
 
 /**
  * Rebuild the on-demand groups successfully opened in one Session.
@@ -16,19 +16,6 @@ export function restoredExposureNames(
   session: AgentSessionLike | undefined,
 ): Set<string> {
   return restoredNames(session, DISCOVERY_TOOL_NAME, "group");
-}
-
-/**
- * Rebuild the individual tools opened with `tool_open` in one Session.
- *
- * Same durability rule as the group restore: a successful call (native or PTC)
- * is the fact that the tool is directly callable for the rest of the session,
- * and a fork inherits the calls in its shared prefix.
- */
-export function restoredOpenedToolNames(
-  session: AgentSessionLike | undefined,
-): Set<string> {
-  return restoredNames(session, MCP_OPEN_TOOL_NAME, "name");
 }
 
 function restoredNames(

@@ -194,22 +194,32 @@ interface ToolManagerSettings {
 - WebUI 和 Host 保存接口都禁止保存空组。旧配置中的空组或冲突组仍会在设置页中标为无效，供用户修复或删除；
 - 保存校验与设置页必须读**同一份**工具目录：standing composition 与 Agent 作用域注册（探针 + 运行中 Agent 观测）的并集。只读 standing 会把 `@deepseek-ai/dsh-schedule` 注入每个 root Agent 的 `schedule_*`、以及 `modelSelectionSettings` 注入的 `subagent` 判成不存在，从而拒绝一个页面能列出、运行时也能正常打开的组。只有真正读不到 standing composition 时才跳过该校验。
 
-### 3.4 MCP 模式（新增）
+### 3.4 MCP 模式
 
-`mode: "mcp"` 不是“按组/按工具启用”，而是**按 schema 体积分层**：
+`mode: "mcp"` 不是“按组/按工具启用”，而是**把“声明”和“调用”拆开**：
 
-- **完整 schema**：`mcp.expose` 白名单里的工具 + `tool_find` + `run_code`；
-- **空壳 schema**：其余所有工具仍然留在步骤工具集里，名称与描述保留，`parameters` 替换为 `{ type: "object", additionalProperties: true }`。模型随时可以直接按名称调用；参数靠 `tool_find` 返回的完整 schema 获知，最终由工具自身的校验兜底。
+- **声明集合**（模型每步读到的工具表）：只有常开工具 + `tool_find`，组内工具一个都不出现。
+- **调用集合**（宿主按名派发能解析到的工具）：常开工具 + 组内工具（未 `disabled`、未被 `tool_list` 顶替）。
 
-`tool_find({ query, limit })` 只读：在空壳池里按名称/描述匹配，返回 `{ name, description, parameters }` 的完整 JSON Schema，不改变任何会话状态。
+组名与描述由一条 notice 注入，`tool_find({ group })` 只读地返回整组每个工具的完整 JSON Schema，读取本身不改变任何会话状态。
 
 实现落点：
 
-1. `tools.resolve()` 的包装里，mcp 模式不走 `filterStepToolSet`（删名字），而走 `stripStepToolSet`：`hidden`（显式 `disabled` 与 `tool_list`）照旧删除，`stripped` 的 definition 用浅拷贝替换 `description`/`parameters`，`execute`/`timeoutMs`/`presentation` 原样保留。
-2. 不调用 `restrict()`：所有工具都要能被 `executable()` 解析到；`disabled` 由步骤集合与 guard 双重拦截。
-3. `mcpPool` = 被 strip 的工具集合；`tool_find` 命中后模型直接用原名调用，不需要任何状态变更。
-4. 空壳 schema 是合法 JSON Schema（`additionalProperties: true`），模型传任意参数都能进入工具自身校验；错误信息由原工具返回。
-5. 元工具只在至少一个 Preset 处于 mcp 模式时注册；切回组模式即恢复原有过滤。
+1. `tools.resolve()` 的包装返回自定义 `ResolvedToolSet`，其 `view()` 给出 `ReachableView`：`Symbol.iterator` / `size` / `keys` / `values` / `entries` 只列声明集合，`get` / `has` 额外命中组内工具。DSH 读声明时靠迭代，原生派发靠 `tools.executable()` → `get()`，两条路自然分开。
+2. 不调用 `restrict()`：组内工具必须留在注册表里才能被 `get()` 命中；`disabled` 由步骤集合与 guard 双重拦截。
+3. `tool_find` 只在至少一个 Preset 处于 mcp 模式时注册，全部切回按需组后即注销；`tool_list` 在 mcp 模式下移出步骤集合（注册不删）。
+4. 组为空 → 不进目录；组内有已关闭工具 → 该工具仍被 guard 拒绝；组名重复 → 归第一个命中的组。
+
+### 3.4.1 PTC 传输下的同一条路
+
+PTC 不给模型看 JSON 工具表，而是按 `tools.schemas(agent, toolSet)` 为每个名字生成一份**程序内绑定**：`await tools.<name>(...)` 里名字不存在就是 `TypeError`。宿主里这两次读取（渲染 SDK 文本的 `definitions()` 与生成绑定的 `schemas()`）原本共用一次 `view().values()` 遍历，所以 `ReachableView` 把组内工具排除出 `values()` 之后，它们在 `run_code` 程序里就没有绑定——1.5.0 在 PTC Preset 上不可用的根因就在这里。
+
+1.5.1 把宿主这两个方法拆开：
+
+- `definitions()` 原样不动，继续只读声明集合 → 生成的 SDK 文本里没有组内工具，模型看不到，靠 `tool_find` 取 schema；
+- 包装 `ToolsService.prototype.schemas()`：调用带 `toolSet`、且该 scope 选中的执行器有 `renderSdk`（即 PTC）时，改用步骤集合的第二面——所有可执行工具的完整 definition（复用宿主自己的 `projectToolSchema`，参数与返回值 schema 都真实，不降级成空壳）。
+
+全宿主只有 PTC 的绑定循环带 `toolSet` 调 `schemas()`，原生派发走 `executable()` → `get()`，所以这条桥只影响 PTC，MCP 模式在两种传输下的节省都不变。
 
 ## 4. 关键实现陷阱
 

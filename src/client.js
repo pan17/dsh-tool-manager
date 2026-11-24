@@ -463,6 +463,11 @@ window.__ModuleLoader__.load({
 			return mcpMode ? TOOL_CATALOG_HELP_MCP : TOOL_CATALOG_HELP;
 		}
 
+		// A PTC preset renders one generated SDK instead of JSON schemas. The
+		// plugin bridges that seam, so the same MCP mode works on both transports;
+		// only the token ruler differs, which the PTC badge above already says.
+		const PTC_MCP_CHIP_TITLE = "MCP 按需：组内工具不声明，模型用 tool_find 读整组参数后直接按名调用（PTC 下工具以绑定形式存在，同样不占 SDK 文本）。";
+
 		function ToolManagerSection() {
 			const [snapshot, setSnapshot] = react.useState(null);
 			const [draft, setDraft] = react.useState(null);
@@ -551,11 +556,6 @@ window.__ModuleLoader__.load({
 				mutatePreset((target) => {
 					if (mode === "mcp") {
 						target.policy.mode = "mcp";
-						if (!target.policy.mcp) {
-							const defaults = ["read", "edit", "grep", "pwsh", "skill", "ask_user_question", "tool_find", "tool_call"];
-							const names = new Set((target.tools || []).map((tool) => tool.name));
-							target.policy.mcp = { expose: defaults.filter((name) => names.has(name)) };
-						}
 					} else {
 						delete target.policy.mode;
 					}
@@ -1367,7 +1367,7 @@ window.__ModuleLoader__.load({
 				h("div", { className: "tm_row", style: { padding: "0 14px 10px" } },
 					h("span", { className: "tm_muted" }, "加载模式"),
 					h("button", { className: "tm_chip" + (mcpMode ? "" : " active"), onClick: () => setMode("groups") }, "按需组"),
-					h("button", { className: "tm_chip" + (mcpMode ? " active" : ""), onClick: () => setMode("mcp") }, "MCP 按需"),
+					h("button", { className: "tm_chip" + (mcpMode ? " active" : ""), onClick: () => setMode("mcp"), title: PTC_MCP_CHIP_TITLE }, "MCP 按需"),
 					mcpMode ? h("span", { className: "tm_muted" }, "分组照常生效：组内工具不在工具表里，模型只看到组名与描述，用 tool_find({ group }) 查整组用法。") : null,
 				),
 				preset.broken ? h("div", { className: "tm_error" }, preset.broken) : null,
@@ -1377,7 +1377,7 @@ window.__ModuleLoader__.load({
 						h("div", null,
 							h("b", null, "工具目录", h("span", { className: "tm_help", tabIndex: 0, "aria-label": "工具目录说明", "data-tip": toolCatalogHelp(mcpMode) }, "?")),
 						),
-						mcpMode ? null : h("div", { className: "tm_row" },
+						h("div", { className: "tm_row" },
 							h("button", { className: "tm_btn", onClick: startAutoGroup, disabled: autoGrouping || autoGroupCandidates.length === 0, title: autoGroupCandidates.length ? "用默认模型对未分组且未关闭的工具进行聚类" : "没有可自动分组的工具" }, autoGrouping ? "自动分组中…" : "自动分组"),
 							h("button", { className: "tm_btn", onClick: openCreate, disabled: autoGrouping }, "手动分组"),
 							h("button", {

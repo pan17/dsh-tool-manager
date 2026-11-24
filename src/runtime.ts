@@ -102,6 +102,7 @@ export class ToolPolicyRuntime {
    */
   private stepFilter: "installed" | "failed" | undefined;
   private restoreStepFilter?: () => void;
+  private restoreSchemasBridge?: () => void;
   /** The registry instance the observed schemas belong to. */
   private presetsInstance?: AgentPresetsLike;
 
@@ -136,6 +137,7 @@ export class ToolPolicyRuntime {
     this.registerDiscovery();
     this.syncMcpTools();
     this.installStepFilter();
+    this.installSchemasBridge();
     const agents = this.ctx.get<{ list(): AgentLike[] }>("agents");
     for (const agent of agents?.list() ?? []) this.install(agent);
 
@@ -833,6 +835,61 @@ export class ToolPolicyRuntime {
     }
   }
 
+  /**
+   * Give a PTC program a binding for every reachable tool, not just the declared
+   * ones.
+   *
+   * PTC instantiates each program's `tools` namespace from
+   * `tools.schemas(agent, toolSet)`, while the SDK text it shows the model comes
+   * from `tools.definitions(agent, toolSet)`. Both walk the same step view, so a
+   * grouped tool has no binding and `await tools.name()` dies as a TypeError
+   * before the guarded pipeline ever sees it. Answering `schemas()` from the
+   * projected set's second face splits the two: the SDK keeps the always-on
+   * roster, and every grouped tool keeps a binding validated against its real
+   * schema and logged under its real name.
+   *
+   * Native tool calling does not read `schemas()` for dispatch — it resolves
+   * through `tools.executable()` and the map's `get()` — so it keeps the
+   * declared-only answer and the MCP token saving is unchanged.
+   */
+  private installSchemasBridge(): void {
+    const tools = this.hostTools();
+    if (!tools) return;
+    const owner = methodOwner(tools, "schemas");
+    if (!owner) return;
+    const current = owner.schemas;
+    if (typeof current !== "function") return;
+    if ((current as PatchedMethod)[SCHEMAS_BRIDGE_MARK]) return;
+    const original = current as (...inputs: unknown[]) => unknown;
+    const bridge = function (this: unknown, ...args: unknown[]): unknown {
+      const projected = args[1] as ReachableStepToolSet | undefined;
+      const reach = projected?.[MCP_REACH_MARK];
+      if (typeof reach !== "function" || !isPtcScope(this, args[0])) {
+        return original.apply(this, args);
+      }
+      try {
+        // Delegate the projection itself: the binding then carries the host's
+        // own schema (real parameters, real output), not a re-derivation of it.
+        const reachable = reach.call(projected, args[0]);
+        const everything: StepToolSetLike = { dispose: () => {}, view: () => reachable };
+        return original.call(this, args[0], everything);
+      } catch {
+        return original.apply(this, args);
+      }
+    } as PatchedMethod;
+    bridge[SCHEMAS_BRIDGE_MARK] = true;
+    try {
+      owner.schemas = bridge;
+      this.restoreSchemasBridge = () => {
+        owner.schemas = current;
+      };
+    } catch (error) {
+      this.warn(
+        `tool-manager could not bridge PTC tool bindings (${errorMessage(error)}); grouped tools stay unbindable inside run_code`,
+      );
+    }
+  }
+
   /** Remove this Agent's hidden names from one resolved step set. */
   private filterStepToolSet(context: unknown, set: unknown): unknown {
     try {
@@ -948,6 +1005,8 @@ export class ToolPolicyRuntime {
   async dispose(): Promise<void> {
     this.restoreStepFilter?.();
     this.restoreStepFilter = undefined;
+    this.restoreSchemasBridge?.();
+    this.restoreSchemasBridge = undefined;
     for (const agent of [...this.states.keys()]) this.uninstall(agent);
     this.mutating = true;
     try {
@@ -1003,6 +1062,9 @@ const RELINK_RETRY_MS = 60;
 /** Cross-reload marker: two wrappers must never stack on one Host. */
 const STEP_FILTER_MARK = Symbol.for("dsh-tool-manager.step-filter");
 
+/** Cross-reload marker for the PTC binding bridge over `tools.schemas()`. */
+const SCHEMAS_BRIDGE_MARK = Symbol.for("dsh-tool-manager.schemas-bridge");
+
 type PatchedMethod = ((this: unknown, ...args: unknown[]) => Promise<unknown>) & Record<symbol, unknown>;
 
 /** One step's admitted registrations, as `tools.resolve()` returns it. */
@@ -1018,29 +1080,65 @@ function isStepToolSet(value: unknown): value is StepToolSetLike {
 }
 
 /**
- * Re-project one step set without the hidden names.
+ * Re-project one step set into the MCP shape.
  *
- * Everything downstream — prompt declarations, PTC bindings, and the
- * executable lookup — reads this map, so dropping a registration here is the
- * 0.2.2 equivalent of removing it from the prompt assembly.
- */
-/**
- * Replace the parameter schema of the listed tools with an empty shell.
- *
- * The definition (its execute closure, timeout, presentation callbacks) is
- * kept, so a model call still runs the real tool and its own argument
- * validation; only the model-facing schema is reduced. `tool_find` is where the
- * real parameters are read.
+ * Hidden names are dropped, grouped names are declared nowhere but stay
+ * executable through the map's `get()`, and the set carries a second face for
+ * the PTC binding loop (see {@link MCP_REACH_MARK}).
  */
 function projectMcpStepToolSet(
   set: StepToolSetLike,
   hidden: ReadonlySet<string>,
   grouped: ReadonlySet<string>,
 ): StepToolSetLike {
-  return {
+  // The set carries a second face for the PTC binding loop: `view()` is the
+  // declaration (grouped tools absent), while this marked accessor is
+  // everything the step may still execute. `ToolsService.schemas()` is patched
+  // to read the accessor on a PTC scope, so a program keeps a binding for every
+  // grouped tool although the generated SDK never mentions it.
+  const projected: ReachableStepToolSet = {
     dispose: () => set.dispose(),
     view: (scope?: unknown) => projectStepView(set.view(scope), hidden, grouped),
+    [MCP_REACH_MARK]: (scope?: unknown) => {
+      const reachable = new Map<string, unknown>();
+      for (const [name, definition] of set.view(scope)) {
+        if (!hidden.has(name)) reachable.set(name, definition);
+      }
+      return reachable;
+    },
   };
+  return projected;
+}
+
+/**
+ * Marker for a projected step set: `(scope) => every executable definition`.
+ *
+ * Registered on `Symbol.for`, like {@link STEP_FILTER_MARK}, so a reload that
+ * re-installs the wrapper recognizes the shape a previous wrapper produced.
+ */
+const MCP_REACH_MARK = Symbol.for("dsh-tool-manager.reach-step-set");
+
+interface ReachableStepToolSet extends StepToolSetLike {
+  [MCP_REACH_MARK]?: (scope?: unknown) => ReadonlyMap<string, unknown>;
+}
+
+/**
+ * Whether this scope's selected executor renders a generated SDK instead of
+ * JSON schemas. Read by shape: the PTC executor is the one with `renderSdk`,
+ * exactly as the catalog prices it, so no host import is needed.
+ */
+function isPtcScope(tools: unknown, scope: unknown): boolean {
+  const select = (tools as { selectExecutor?: unknown } | undefined)?.selectExecutor;
+  if (typeof select !== "function") return false;
+  try {
+    const executor = (select as (input: unknown) => unknown).call(tools, scope) as
+      | { renderSdk?: unknown }
+      | undefined;
+    return typeof executor?.renderSdk === "function";
+  } catch {
+    // No executor in this scope: not PTC, and the caller keeps the original.
+    return false;
+  }
 }
 
 /**

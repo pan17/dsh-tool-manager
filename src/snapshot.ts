@@ -5,7 +5,6 @@ import { estimateGroupTokens, estimateToolTokens, presetTokenStats } from "./sta
 import { measurePresetTokens, type TokenModel } from "./transport.js";
 import {
   DISCOVERY_TOOL_NAME,
-  MCP_OPEN_TOOL_NAME,
   MCP_FIND_TOOL_NAME,
   PTC_TRANSPORT_NAME,
   type PresetCatalogView,
@@ -42,7 +41,6 @@ export async function buildSnapshot(
             schema.name !== DISCOVERY_TOOL_NAME
             && schema.name !== PTC_TRANSPORT_NAME
             && schema.name !== MCP_FIND_TOOL_NAME
-            && schema.name !== MCP_OPEN_TOOL_NAME
           ))
           .map(projectSchema);
       } catch (error) {

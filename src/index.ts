@@ -17,7 +17,6 @@ import { ToolPolicyRuntime } from "./runtime.js";
 import { buildSnapshot, mergeSchemas } from "./snapshot.js";
 import {
   DISCOVERY_TOOL_NAME,
-  MCP_OPEN_TOOL_NAME,
   MCP_FIND_TOOL_NAME,
   PTC_TRANSPORT_NAME,
   TOOL_MANAGER_PROBE_SESSION_ID,
@@ -420,7 +419,7 @@ export function apply(ctx: unknown): void {
       // a group that closed or a tool the user disabled is not a lost
       // registration, and reporting it would be a false alarm.
       if (toolName === DISCOVERY_TOOL_NAME || toolName === PTC_TRANSPORT_NAME) return true;
-      if (toolName === MCP_FIND_TOOL_NAME || toolName === MCP_OPEN_TOOL_NAME) return true;
+      if (toolName === MCP_FIND_TOOL_NAME) return true;
       const policy = policyFor(config.get(), presetId);
       if (policy.disabled.includes(toolName)) return true;
       return policy.groups.some((group) => matchesAnyPattern(toolName, group.patterns));
@@ -549,7 +548,6 @@ export function apply(ctx: unknown): void {
               schema.name !== DISCOVERY_TOOL_NAME
               && schema.name !== PTC_TRANSPORT_NAME
               && schema.name !== MCP_FIND_TOOL_NAME
-              && schema.name !== MCP_OPEN_TOOL_NAME
             ));
           const selected = selectSuggestionTools(schemas, body?.toolNames);
           const otherGroupNames = normalizeGroupNames(body?.otherGroupNames);
@@ -594,7 +592,6 @@ export function apply(ctx: unknown): void {
               schema.name !== DISCOVERY_TOOL_NAME
               && schema.name !== PTC_TRANSPORT_NAME
               && schema.name !== MCP_FIND_TOOL_NAME
-              && schema.name !== MCP_OPEN_TOOL_NAME
             ));
           const selected = selectSuggestionTools(schemas, body?.toolNames);
           const otherGroupNames = normalizeGroupNames(body?.otherGroupNames);
@@ -803,6 +800,8 @@ export async function assertNoEmptyGroups(
     }
   }
 }
+
+
 
 function nextEventLoopTurn(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));

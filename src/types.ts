@@ -1,8 +1,7 @@
 export const DISCOVERY_TOOL_NAME = "tool_list";
 export const PTC_TRANSPORT_NAME = "run_code";
-/** MCP-style discovery pair: search the hidden pool, then open one match. */
+/** MCP-style discovery tool: search the hidden pool without changing the declaration set. */
 export const MCP_FIND_TOOL_NAME = "tool_find";
-export const MCP_OPEN_TOOL_NAME = "tool_open";
 /** One durable internal Session shared by every cold-Preset schema probe. */
 export const TOOL_MANAGER_PROBE_SESSION_ID = "tool-manager-probe-internal-v1";
 
@@ -17,11 +16,6 @@ export interface ToolGroupPolicy {
   patterns: string[];
 }
 
-export interface McpToolPolicy {
-  /** Tool names and `*` wildcard patterns that stay visible in mcp mode. */
-  expose: string[];
-}
-
 export interface PresetToolPolicy {
   /** Exact tool names hidden for every session on this preset. */
   disabled: string[];
@@ -29,8 +23,6 @@ export interface PresetToolPolicy {
   groups: ToolGroupPolicy[];
   /** Tool-loading mode; absent means the historical "groups" mode. */
   mode?: "groups" | "mcp";
-  /** MCP-mode settings; only read when `mode` is "mcp". */
-  mcp?: McpToolPolicy;
 }
 
 export interface ToolManagerSettings {

@@ -5,6 +5,22 @@
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-11-23
+
+### Added
+
+- **MCP 按需模式现在也支持 PTC 传输**（issue #10 的 PTC 反馈）。PTC 的程序内绑定来自 `tools.schemas(agent, toolSet)`，而渲染给模型的 SDK 文本来自 `tools.definitions(agent, toolSet)`；宿主原本让这两个读取共用一次步骤集合遍历，因此组内工具在 `ReachableView` 里被排除出声明后，在 `run_code` 程序里同样没有绑定，`await tools.名字()` 直接 `TypeError`。现在插件单独包装 `ToolsService.prototype.schemas()`：仅当调用带 `toolSet` 且该 scope 的执行器有 `renderSdk`（即 PTC）时，改读步骤集合的第二面——所有可执行工具的完整 definition，并用宿主自己的 `projectToolSchema` 投影。结果是 SDK 文本里依然没有组内工具（模型照旧用 `tool_find` 取 schema），但每个组内工具都有绑定，参数校验与日志都用真实 schema。宿主里只有 PTC 绑定循环带 `toolSet` 调 `schemas()`，原生路径走 `executable()` → `get()`，所以两种传输下的 MCP 节省都不受影响。
+
+### Fixed
+
+- MCP 模式下设置页把「自动分组 / 手动分组 / 重置配置 / 复制配置」整行一起藏掉了，而 `groups` 恰恰是 MCP 模式唯一的隐藏来源：新建的 Preset 直接切到 MCP 会变成全量声明，页面上也没有任何建组入口。这行现在在两种模式下都显示。
+
+### Removed
+
+- 死字段 `mcp.expose`：设置页会写、服务端会归一化保存，运行时从不读。已删除，旧配置里的 `mcp.expose` 被直接忽略（不迁移、不报错）。
+- 死代码 `MCP_OPEN_TOOL_NAME`（`tool_open`）与 `restoredOpenedToolNames()`：`tool_open` 从未注册成工具，相关引用只是在过滤/隐藏一个不存在的名字；`restoredOpenedToolNames` 没有调用方。
+
+
 ## [1.5.0] - 2026-11-22
 
 ### Added

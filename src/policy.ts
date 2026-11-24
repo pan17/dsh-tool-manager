@@ -1,6 +1,5 @@
 import {
   DISCOVERY_TOOL_NAME,
-  MCP_OPEN_TOOL_NAME,
   MCP_FIND_TOOL_NAME,
   PTC_TRANSPORT_NAME,
   type PresetOrphans,
@@ -50,14 +49,10 @@ export function normalizePresetPolicy(value: unknown): PresetToolPolicy {
   }
 
   const mode = record?.mode === "mcp" ? "mcp" as const : undefined;
-  const mcpRaw = asRecord(record?.mcp);
-  const mcpExpose = uniqueStrings(mcpRaw?.expose);
-  const mcp = mcpRaw === undefined && mcpExpose.length === 0 ? undefined : { expose: mcpExpose };
   return {
     disabled,
     groups,
     ...(mode === undefined ? {} : { mode }),
-    ...(mcp === undefined ? {} : { mcp }),
   };
 }
 
@@ -179,10 +174,9 @@ export function denyNames(
   hidden.delete(PTC_TRANSPORT_NAME);
   if (groups.length > 0) hidden.delete(DISCOVERY_TOOL_NAME);
   else if (toolNames.includes(DISCOVERY_TOOL_NAME)) hidden.add(DISCOVERY_TOOL_NAME);
-  // The discovery pair is registered globally as soon as ANY preset runs mcp
-  // mode. A groups-mode preset must never see it: the pair belongs to mcp mode.
+  // `tool_find` is registered globally as soon as ANY preset runs mcp mode. A
+  // groups-mode preset must never see it: the finder belongs to mcp mode.
   if (toolNames.includes(MCP_FIND_TOOL_NAME)) hidden.add(MCP_FIND_TOOL_NAME);
-  if (toolNames.includes(MCP_OPEN_TOOL_NAME)) hidden.add(MCP_OPEN_TOOL_NAME);
   return toolNames.filter((name) => hidden.has(name));
 }
 
