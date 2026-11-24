@@ -463,10 +463,11 @@ window.__ModuleLoader__.load({
 			return mcpMode ? TOOL_CATALOG_HELP_MCP : TOOL_CATALOG_HELP;
 		}
 
-		// A PTC preset renders one generated SDK instead of JSON schemas. The
-		// plugin bridges that seam, so the same MCP mode works on both transports;
-		// only the token ruler differs, which the PTC badge above already says.
-		const PTC_MCP_CHIP_TITLE = "MCP 按需：组内工具不声明，模型用 tool_find 读整组参数后直接按名调用（PTC 下工具以绑定形式存在，同样不占 SDK 文本）。";
+		// One short hover line per mode. The chips carry the explanation now:
+		// the row used to print a paragraph beside them, which pushed the chips
+		// around and repeated what the tool catalog help already says.
+		const GROUP_CHIP_TITLE = "组内工具平时不声明；模型用 tool_list({ group }) 打开一组后，这组工具才进入工具表。";
+		const MCP_CHIP_TITLE = "组内工具始终不进工具表；模型用 tool_find({ group }) 看整组参数，随时能按名字直接调用。";
 
 		function ToolManagerSection() {
 			const [snapshot, setSnapshot] = react.useState(null);
@@ -1325,7 +1326,7 @@ window.__ModuleLoader__.load({
 
 			return h("div", { className: "tm_root" },
 				h("div", { className: "tm_head" },
-					h("div", null, h("h2", null, "Agent 工具管理"), h("div", { className: "tm_muted" }, "按每个 Agent 预设开关工具。点「手动分组」把不常用的收进按需组：平时模型看不到，需要时先查目录再打开；也可以在下方切换为「MCP 按需」，让模型用 tool_find / tool_call 按需加载。")),
+					h("div", null, h("h2", null, "Agent 工具管理"), h("div", { className: "tm_muted" }, "按每个 Agent 预设开关工具。点「手动分组」把不常用的收进按需组：平时模型看不到，需要时先查目录再打开。")),
 					h("div", { className: "tm_row" },
 						h("button", { className: "tm_btn", onClick: reload, disabled: busy || autoGrouping }, "刷新"),
 						h("button", {
@@ -1366,9 +1367,8 @@ window.__ModuleLoader__.load({
 				),
 				h("div", { className: "tm_row", style: { padding: "0 14px 10px" } },
 					h("span", { className: "tm_muted" }, "加载模式"),
-					h("button", { className: "tm_chip" + (mcpMode ? "" : " active"), onClick: () => setMode("groups") }, "按需组"),
-					h("button", { className: "tm_chip" + (mcpMode ? " active" : ""), onClick: () => setMode("mcp"), title: PTC_MCP_CHIP_TITLE }, "MCP 按需"),
-					mcpMode ? h("span", { className: "tm_muted" }, "分组照常生效：组内工具不在工具表里，模型只看到组名与描述，用 tool_find({ group }) 查整组用法。") : null,
+					h("button", { className: "tm_chip" + (mcpMode ? "" : " active"), onClick: () => setMode("groups"), title: GROUP_CHIP_TITLE }, "默认"),
+					h("button", { className: "tm_chip" + (mcpMode ? " active" : ""), onClick: () => setMode("mcp"), title: MCP_CHIP_TITLE }, "MCP 按需"),
 				),
 				preset.broken ? h("div", { className: "tm_error" }, preset.broken) : null,
 				autoGroupError ? h("div", { className: "tm_error" }, autoGroupError) : null,
