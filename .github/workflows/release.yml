@@ -1,32 +1,70 @@
 name: Release
 
+# A tag is the ONLY trigger. Everything the release needs is verified here,
+# on the tagged commit itself — the workflow does not poll `ci.yml` and does
+# not depend on CI having run on `main` first.
 on:
   push:
     tags:
       - 'v*'
 
+# Two tags pushed in quick succession must not publish concurrently. The
+# group is per-tag, and an in-flight release is never cancelled midway — a
+# half-published release is worse than a queued one.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
-  packages: write
+  # npm Trusted Publishing (OIDC). The publish job exchanges this token for a
+  # short-lived npm credential, so no long-lived npm token has to be stored as
+  # a repository secret. The npm side must be configured to trust THIS workflow
+  # file (release.yml) — see PUBLISH.md.
+  id-token: write
 
 jobs:
-  publish-npm:
+  # Build + test on the tagged commit, and refuse a tag that disagrees with
+  # package.json. This runs BEFORE anything is created, so a mismatch costs
+  # nothing to undo: no GitHub Release, no npm version, no tag surgery.
+  verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           registry-url: 'https://registry.npmjs.org'
+      # An explicit cache with `restore-keys` rather than setup-node's
+      # `cache: npm`: that option keys strictly on hashFiles(lockfile), and
+      # `npm version` rewrites package-lock.json on every release, so the
+      # release commit would always miss and cold-install.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-
       - run: npm ci
       - run: npm run build
-      - run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.DSH_TOOL_MANAGER }}
+      - run: npm test
+      - name: Tag must match package.json version
+        run: |
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "v$pkg" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $pkg"
+            exit 1
+          fi
+          echo "tag $GITHUB_REF_NAME matches package.json ✓"
 
+  # GitHub Release notes come from CHANGELOG.md. `query` fails the job when
+  # the version section is missing, which is the intended outcome: a release
+  # with empty notes is worse than no release.
   release:
-    needs: publish-npm
+    needs: verify
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Extract release notes from CHANGELOG.md
@@ -40,3 +78,38 @@ jobs:
         with:
           body: ${{ steps.changelog.outputs.release-notes }}
           draft: false
+
+  # `needs: release` — not `verify`. A Release that fails (missing CHANGELOG
+  # section, API hiccup) must also stop npm, or the two artefacts drift apart.
+  # Authentication is OIDC trusted publishing, not a stored token: npm CLI
+  # detects the OIDC environment and authenticates on its own. Passing
+  # `--provenance` explicitly is unnecessary (it disables npm's own
+  # public/private check for public repos).
+  publish-npm:
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # npm's documented floor for OIDC is npm 11.5.1 + Node 22.14. Node 24
+          # bundles npm 11.x, and the explicit upgrade covers builds that ship
+          # an older npm (24.0.0 shipped 11.3.0).
+          node-version: 24
+          registry-url: 'https://registry.npmjs.org'
+      - name: Ensure npm supports OIDC trusted publishing
+        run: |
+          npm install -g npm@^11.5.1
+          npm --version
+      - uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-
+      - run: npm ci
+      # No separate `npm run build`: `prepublishOnly` already runs
+      # `npm run build && npm test`, so building here would duplicate it and
+      # test the pre-hook output rather than the shipped one.
+      - run: npm publish
