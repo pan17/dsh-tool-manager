@@ -22,7 +22,7 @@ window.__ModuleLoader__.load({
 			".tm_filters{display:flex;gap:6px;flex-wrap:wrap;align-items:center}.tm_chip{appearance:none;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));border-radius:999px;background:transparent;color:inherit;padding:4px 9px;cursor:pointer;font:inherit;font-size:11px}.tm_chip.active{border-color:#7c8cff;background:color-mix(in srgb,#7c8cff 16%,transparent)}",
 			".tm_stats{display:flex;flex-wrap:nowrap;gap:6px;padding:8px 12px;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.13))}.tm_stat{flex:1 1 0;min-width:0;padding:6px 7px;border-radius:7px;background:var(--dsw-alias-bg-layer-1,rgba(128,128,128,.07));border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.15))}.tm_stat_value{font-size:15px;font-weight:700;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tm_stat_label{margin-top:2px;font-size:10px;line-height:1.3;color:var(--dsw-alias-label-secondary,#9097a4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}@media(max-width:560px){.tm_stats{flex-wrap:wrap}.tm_stat{flex:1 1 30%}}",
 			".tm_token{display:inline-flex;align-items:center;margin-left:6px;padding:1px 6px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.22));border-radius:999px;background:var(--dsw-alias-bg-layer-1,rgba(128,128,128,.09));font:600 10px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--dsw-alias-label-secondary,#9097a4);white-space:nowrap;vertical-align:middle}.tm_tool>.tm_token{margin-left:auto;flex:0 0 auto}.tm_stat_extra{margin-top:1px;font-size:9.5px;line-height:1.3;color:var(--dsw-alias-label-secondary,#9097a4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
-			".tm_help{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;margin-left:6px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));border-radius:50%;background:var(--dsw-alias-bg-layer-1,rgba(128,128,128,.08));color:var(--dsw-alias-label-secondary,#9097a4);font:700 10px/1 ui-sans-serif,system-ui,sans-serif;cursor:help;vertical-align:middle;outline:none}.tm_help:hover,.tm_help:focus-visible{border-color:#7c8cff;color:#9da8ff}.tm_help::after{content:attr(data-tip);position:absolute;left:0;top:calc(100% + 6px);width:min(520px,calc(100vw - 48px));max-width:100%;padding:10px 12px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));border-radius:9px;background:var(--dsw-alias-bg-base,#17191d);box-shadow:0 14px 40px rgba(0,0,0,.35);color:var(--dsw-alias-label-primary,#e7e9ed);font:400 12px/1.65 ui-sans-serif,system-ui,sans-serif;white-space:pre-line;text-align:left;opacity:0;visibility:hidden;pointer-events:none;z-index:30;transition:opacity .12s ease}.tm_help:hover::after,.tm_help:focus-visible::after{opacity:1;visibility:visible}",
+			".tm_help{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;margin-left:6px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));border-radius:50%;background:var(--dsw-alias-bg-layer-1,rgba(128,128,128,.08));color:var(--dsw-alias-label-secondary,#9097a4);font:700 10px/1 ui-sans-serif,system-ui,sans-serif;cursor:help;vertical-align:middle;outline:none}.tm_help:hover,.tm_help:focus-visible{border-color:#7c8cff;color:#9da8ff}.tm_help::after{content:attr(data-tip);position:absolute;left:0;top:calc(100% + 6px);width:min(520px,calc(100vw - 48px));max-width:none;padding:10px 12px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));border-radius:9px;background:var(--dsw-alias-bg-base,#17191d);box-shadow:0 14px 40px rgba(0,0,0,.35);color:var(--dsw-alias-label-primary,#e7e9ed);font:400 12px/1.65 ui-sans-serif,system-ui,sans-serif;white-space:pre-line;text-align:left;opacity:0;visibility:hidden;pointer-events:none;z-index:30;transition:opacity .12s ease}.tm_help:hover::after,.tm_help:focus-visible::after{opacity:1;visibility:visible}",
 			".tm_badge{display:inline-block;margin-left:6px;padding:2px 7px;border:1px solid transparent;border-radius:999px;font-size:10px;font-weight:700;line-height:1.35;letter-spacing:.02em;vertical-align:middle;color:#fff}.tm_badge.off{background:#b42318;border-color:#d92d20;color:#fff}.tm_badge.cold{background:#4338ca;border-color:#6366f1;color:#fff}.tm_badge.live{background:#15803d;border-color:#22c55e;color:#fff}.tm_badge.ptc{background:#6d28d9;border-color:#a78bfa;color:#fff}.tm_badge.native{background:#334155;border-color:#64748b;color:#fff}",
 			".tm_group{border-bottom:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.13))}.tm_group:last-child{border-bottom:0}",
 			".tm_group_bar{display:flex;align-items:center;gap:8px;padding:11px 14px}",
@@ -597,11 +597,16 @@ window.__ModuleLoader__.load({
 			return mcpMode ? TOOL_CATALOG_HELP_MCP : TOOL_CATALOG_HELP;
 		}
 
-		// One short hover line per mode. The chips carry the explanation now:
-		// the row used to print a paragraph beside them, which pushed the chips
-		// around and repeated what the tool catalog help already says.
-		const GROUP_CHIP_TITLE = "组内工具平时不声明；模型用 tool_list({ group }) 打开一组后，这组工具才进入工具表。";
-		const MCP_CHIP_TITLE = "组内工具始终不进工具表；模型用 tool_find({ group }) 看整组参数，随时能按名字直接调用。";
+		// One help entry next to the mode label. Both mode explanations live
+		// there instead of on the chips, so the warning below covers the whole
+		// choice instead of looking like a property of one hovered button.
+		const LOADING_MODE_HELP = [
+			"默认：组内工具平时不声明；模型用 tool_list({ group }) 打开一组后，这组工具才进入工具表。",
+			"",
+			"MCP 按需：组内工具始终不进工具表；模型用 tool_find({ group }) 看整组参数，随时能按名字直接调用。",
+			"",
+			"注意：MCP 按需依赖模型能够直接发出未声明的工具名。部分供应商会限制工具调用名（例如 OpenCode Go），模型只能反复调用 tool_find，无法真正调用组内工具；遇到这种情况请改用「默认」加载模式。",
+		].join("\n");
 
 		// The generation model is a global choice, not a Preset one: auto-naming
 		// and auto-grouping classify tools and print JSON, so a fast model is
@@ -1774,9 +1779,9 @@ window.__ModuleLoader__.load({
 							: h("span", { className: "tm_badge native", title: "本 Preset 走原生 tool-calling：工具以 JSON schema 随请求发送，token 按 JSON ÷4 估算" }, "原生"),
 				),
 				h("div", { className: "tm_row", style: { padding: "0 14px 10px" } },
-					h("span", { className: "tm_muted" }, "加载模式"),
-					h("button", { className: "tm_chip" + (mcpMode ? "" : " active"), onClick: () => setMode("groups"), title: GROUP_CHIP_TITLE }, "默认"),
-					h("button", { className: "tm_chip" + (mcpMode ? " active" : ""), onClick: () => setMode("mcp"), title: MCP_CHIP_TITLE }, "MCP 按需"),
+					h("span", { className: "tm_muted", style: { position: "relative" } }, "加载模式", h("span", { className: "tm_help", tabIndex: 0, "aria-label": "加载模式说明", "data-tip": LOADING_MODE_HELP }, "?")),
+					h("button", { className: "tm_chip" + (mcpMode ? "" : " active"), onClick: () => setMode("groups") }, "默认"),
+					h("button", { className: "tm_chip" + (mcpMode ? " active" : ""), onClick: () => setMode("mcp") }, "MCP 按需"),
 				),
 				preset.broken ? h("div", { className: "tm_error" }, preset.broken) : null,
 				autoGroupError ? h("div", { className: "tm_error" }, autoGroupError) : null,
