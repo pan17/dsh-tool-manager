@@ -67,6 +67,10 @@ interface AgentState {
   guard?: () => void;
   assemblyFilter?: () => void;
   readonly exposures: Set<string>;
+  /** Event position the exposure fold has already consumed. */
+  exposureScanSeq: number;
+  /** Whether the next catalog publication must explain a compaction reset. */
+  catalogReset?: boolean;
 }
 
 export class ToolPolicyRuntime {
@@ -151,6 +155,11 @@ export class ToolPolicyRuntime {
     });
     this.ctx.on("tools/change", () => this.queueBaselineRefresh());
     this.ctx.on("agent/pre-step", (...args: unknown[]) => this.onPreStep(args[0], args[1]));
+    // Compaction is not a step: `tools.resolve()` runs before `agent/pre-step`,
+    // so the first request after `/compact` would otherwise be built from the
+    // pre-compaction tool set. Narrowing the moment `compaction/end` lands puts
+    // the new set in place before the next resolve.
+    this.ctx.on("session/event", (...args: unknown[]) => this.onSessionEvent(args[0], args[1]));
   }
 
   update(next: ToolManagerSettings): void {
@@ -164,6 +173,9 @@ export class ToolPolicyRuntime {
       //  - group mode stores group names, and a renamed or deleted group must go;
       //  - mcp mode stores nothing today, but the set is cleared so a switch back
       //    to group mode never inherits stale names from an earlier policy.
+      // A new `keepAfterCompaction` limit deliberately does not close anything
+      // here: it is read at the next completed compaction, and by the restore
+      // replay, so lowering it never yanks an answer out of an open turn.
       const policy = this.policy(state.agent);
       if (isMcpMode(policy)) {
         state.exposures.clear();
@@ -190,7 +202,10 @@ export class ToolPolicyRuntime {
     const exposures = new Set<string>();
     if (!isMcpMode(policy)) {
       const groups = resolveActiveGroups(policy, baseline);
-      const restored = restoredExposureNames(agent.session);
+      const restored = restoredExposureNames(agent.session, {
+        groups,
+        keepAfterCompaction: policy.keepAfterCompaction,
+      });
       for (const name of restored) {
         const group = findGroup(groups, name);
         if (group) exposures.add(group.name);
@@ -201,6 +216,7 @@ export class ToolPolicyRuntime {
       baseline,
       baselineSchemas,
       exposures,
+      exposureScanSeq: agent.session?.seq ?? 0,
     };
     this.states.set(agent, state);
     this.observe(state);
@@ -496,6 +512,100 @@ export class ToolPolicyRuntime {
     };
   }
 
+  /**
+   * React to one Session event.
+   *
+   * Only a completed compaction matters here, and only to get ahead of the
+   * tool-set resolution that always runs before `agent/pre-step`. The pre-step
+   * call still applies the policy (and publishes the reset catalog), so a lost
+   * event cannot strand the state; the cursor makes the second call idle.
+   * @param session - the Session that appended the event.
+   * @param event - the appended event.
+   */
+  private onSessionEvent(session: unknown, event: unknown): void {
+    if (asRecord(event)?.type !== "compaction/end") return;
+    if (asRecord(asRecord(event)?.data)?.error !== undefined) return;
+    const state = this.stateForSession(session);
+    if (state) this.applyCompactionPolicy(state);
+  }
+
+  /** The live state whose Agent owns one Session. */
+  private stateForSession(session: unknown): AgentState | undefined {
+    const record = asRecord(session);
+    const id = typeof record?.id === "string" ? record.id : undefined;
+    for (const state of this.states.values()) {
+      if (state.agent.session === session) return state;
+      if (id !== undefined && state.agent.id === id) return state;
+    }
+    return undefined;
+  }
+
+  /**
+   * Apply the compaction policy for the Agent a `tools.resolve()` call belongs
+   * to, before the host snapshots that step's tool set.
+   * @param context - the scope passed to `tools.resolve()`.
+   */
+  private applyCompactionPolicyFor(context: unknown): void {
+    const agent = asCreated(context)?.agent;
+    if (!agent) return;
+    const state = this.states.get(agent);
+    if (state) this.applyCompactionPolicy(state);
+  }
+
+  /**
+   * Re-derive the opened groups once a compaction has landed.
+   *
+   * Compaction rewrites the model-visible surface, so the `tool_list` results
+   * that justified older openings may no longer be in the transcript the model
+   * reads. When the Preset asks for a limit, keeping every group ever opened
+   * would spend context on tools the compacted history no longer mentions; the
+   * groups touched since the previous compaction stay open and the rest fall
+   * back to on-demand, where `tool_list` can reopen them.
+   *
+   * The new set comes from replaying the whole log, not from patching the live
+   * one, so a prune and the restore after a restart always agree. Only events
+   * appended since the last scan are walked to find the trigger, and a full
+   * replay then runs once per completed compaction.
+   * @param state - the Agent whose exposure set may need narrowing.
+   */
+  private applyCompactionPolicy(state: AgentState): void {
+    const session = state.agent.session;
+    if (!session) return;
+    const policy = this.policy(state.agent);
+    if (isMcpMode(policy)) {
+      state.exposureScanSeq = session.seq;
+      return;
+    }
+    let compacted = false;
+    for (let seq = Math.min(state.exposureScanSeq, session.seq); seq < session.seq; seq += 1) {
+      const event = session.eventAt(seq);
+      if (event?.type !== "compaction/end") continue;
+      // A failed attempt closes its bracket with the failure; the transcript was
+      // not replaced, so nothing was forgotten and nothing may be closed.
+      if (asRecord(event.data)?.error !== undefined) continue;
+      compacted = true;
+      break;
+    }
+    state.exposureScanSeq = session.seq;
+    const limit = policy.keepAfterCompaction;
+    if (!compacted || limit === undefined) return;
+    const groups = resolveActiveGroups(policy, state.baseline);
+    const folded = restoredExposureNames(session, { groups, keepAfterCompaction: limit });
+    const next = new Set<string>();
+    for (const name of folded) {
+      const group = findGroup(groups, name);
+      if (group) next.add(group.name);
+    }
+    const closed = [...state.exposures].filter((name) => !next.has(name));
+    state.exposures.clear();
+    for (const name of next) state.exposures.add(name);
+    if (closed.length === 0) return;
+    // The catalog itself did not change, but the model must know that reopened
+    // names were reset rather than remembered as still available.
+    state.catalogReset = true;
+    this.reconcile(state);
+  }
+
   private async onPreStep(payload: unknown, next: unknown): Promise<unknown> {
     const decision = typeof next === "function"
       ? await (next as () => Promise<unknown>)()
@@ -515,6 +625,9 @@ export class ToolPolicyRuntime {
     // snapshot would otherwise leave its on-demand group empty here, and the
     // model would never learn the group exists.
     this.syncBaseline(state);
+    // Also before the catalog decision, so a reset can be explained in the very
+    // message that republishes the catalog.
+    this.applyCompactionPolicy(state);
     const policy = this.policy(agent);
     if (isMcpMode(policy)) {
       return applyMcpNoticeDecision(decision, {
@@ -526,10 +639,15 @@ export class ToolPolicyRuntime {
       }, mcpNoticeHistory(agent));
     }
     const groups = resolveActiveGroups(policy, state.baseline);
+    const history = catalogHistory(agent);
+    if (state.catalogReset) {
+      history.reset = true;
+      state.catalogReset = false;
+    }
     const withCatalog = applyCatalogDecision(
       decision,
       catalogEntriesFromGroups(groups),
-      catalogHistory(agent),
+      history,
     );
     // A Session that used to run mcp mode keeps that notice in its history; the
     // group catalog alone would not contradict it.
@@ -815,7 +933,9 @@ export class ToolPolicyRuntime {
     const patched = (async function (this: unknown, ...args: unknown[]): Promise<unknown> {
       // Before the host resolves the set: a tool registered after this Agent's
       // snapshot must join its on-demand group now, or the group stays empty and
-      // the tool stays admitted for this step.
+      // the tool stays admitted for this step. A compaction that landed since
+      // the last step narrows the opened groups in the same window.
+      runtime.applyCompactionPolicyFor(args[0]);
       runtime.syncStepBaseline(args[0]);
       const set = await (current as (...inputs: unknown[]) => Promise<unknown>).apply(this, args);
       return runtime.filterStepToolSet(args[0], set);

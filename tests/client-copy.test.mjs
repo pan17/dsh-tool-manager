@@ -186,3 +186,60 @@ describe("resetPresetPolicy", () => {
     assert.deepEqual(plain(client.resetPresetPolicy(undefined)), { disabled: [], groups: [] });
   });
 });
+
+describe("compaction keep limit settings", () => {
+  it("carries the source limit through a copy and overwrites the target's", () => {
+    const source = preset("standard", ["alpha", "beta"], {
+      disabled: [],
+      groups: [{ name: "组", patterns: ["alpha"] }],
+      keepAfterCompaction: 2,
+    });
+    const target = preset("minimal", ["alpha", "beta"], {
+      disabled: [],
+      groups: [],
+      keepAfterCompaction: 5,
+    });
+
+    const copied = plain(client.copyPresetPolicy(source, target));
+    assert.equal(copied.keepAfterCompaction, 2);
+    assert.deepEqual(copied.groups, [{ name: "组", patterns: ["alpha"] }]);
+  });
+
+  it("clears the target limit when the source has none, like the rest of the policy", () => {
+    const source = preset("standard", ["alpha"], { disabled: [], groups: [] });
+    const target = preset("minimal", ["alpha"], {
+      disabled: [],
+      groups: [],
+      keepAfterCompaction: 4,
+    });
+
+    const copied = plain(client.copyPresetPolicy(source, target));
+    assert.equal("keepAfterCompaction" in copied, false);
+  });
+
+  it("keeps the limit when a preset config is reset", () => {
+    const policy = {
+      disabled: ["alpha"],
+      groups: [{ name: "组", patterns: ["beta"] }],
+      keepAfterCompaction: 0,
+    };
+    assert.deepEqual(plain(client.resetPresetPolicy(policy)), {
+      disabled: [],
+      groups: [],
+      keepAfterCompaction: 0,
+    });
+    assert.deepEqual(plain(client.resetPresetPolicy(undefined)), { disabled: [], groups: [] });
+  });
+
+  it("sends the limit in the saved page payload", () => {
+    const payload = plain(client.settingsPayload({
+      presets: [
+        { id: "standard", policy: { disabled: [], groups: [], keepAfterCompaction: 0 } },
+        { id: "minimal", policy: { disabled: [], groups: [] } },
+      ],
+    }));
+    assert.deepEqual(payload.presets.standard, { disabled: [], groups: [], keepAfterCompaction: 0 });
+    assert.deepEqual(payload.presets.minimal, { disabled: [], groups: [] });
+    assert.equal("keepAfterCompaction" in payload.presets.minimal, false);
+  });
+});

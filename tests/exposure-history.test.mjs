@@ -58,6 +58,31 @@ function ptc(group, isError = false, args = { group }) {
   };
 }
 
+function memberCall(callId, name) {
+  return {
+    type: "tool/call",
+    data: { callId, name, arguments: "{}" },
+  };
+}
+
+function memberPtc(name, isError = false) {
+  return {
+    type: "tool/ptc-dispatch",
+    data: { name, arguments: "{}", isError, content: [] },
+  };
+}
+
+function compaction(error) {
+  return {
+    type: "compaction/end",
+    data: error === undefined ? { turn: 1 } : { turn: 1, error },
+  };
+}
+
+function group(name, tools) {
+  return { name, description: "", patterns: tools, tools };
+}
+
 describe("tool_list exposure history", () => {
   it("restores successful native tool_list calls and deduplicates groups", () => {
     const restored = restoredExposureNames(session([
@@ -133,5 +158,189 @@ describe("tool_list exposure history", () => {
       inheritedEventCount: -1,
     });
     assert.deepEqual([...restored], ["Recovered"]);
+  });
+});
+
+describe("compaction keep limit", () => {
+  const groups = [group("GitHub", ["github_issue"]), group("Search", ["web_search"]), group("Browser", ["browser_open"])];
+
+  it("keeps every opened group when no limit is configured", () => {
+    const restored = restoredExposureNames(session([
+      call("a", "GitHub"),
+      result("a"),
+      compaction(),
+      call("b", "Search"),
+      result("b"),
+    ]), { groups });
+    assert.deepEqual([...restored], ["GitHub", "Search"]);
+  });
+
+  it("keeps only the most recently opened groups after a completed compaction", () => {
+    const restored = restoredExposureNames(session([
+      call("a", "GitHub"),
+      result("a"),
+      call("b", "Search"),
+      result("b"),
+      call("c", "Browser"),
+      result("c"),
+      compaction(),
+    ]), { groups, keepAfterCompaction: 2 });
+    assert.deepEqual([...restored], ["Search", "Browser"]);
+  });
+
+  it("ranks a group by its newest successful member-tool call", () => {
+    const restored = restoredExposureNames(session([
+      call("a", "GitHub"),
+      result("a"),
+      call("b", "Search"),
+      result("b"),
+      memberCall("use", "github_issue"),
+      result("use"),
+      compaction(),
+    ]), { groups, keepAfterCompaction: 1 });
+    assert.deepEqual([...restored], ["GitHub"]);
+  });
+
+  it("keeps groups opened after the compaction even beyond the limit", () => {
+    const restored = restoredExposureNames(session([
+      call("a", "GitHub"),
+      result("a"),
+      call("b", "Search"),
+      result("b"),
+      compaction(),
+      call("c", "Browser"),
+      result("c"),
+    ]), { groups, keepAfterCompaction: 1 });
+    assert.deepEqual([...restored], ["Search", "Browser"]);
+  });
+
+  it("closes every opened group when the limit is zero", () => {
+    const restored = restoredExposureNames(session([
+      call("a", "GitHub"),
+      result("a"),
+      call("b", "Search"),
+      result("b"),
+      compaction(),
+    ]), { groups, keepAfterCompaction: 0 });
+    assert.deepEqual([...restored], []);
+  });
+
+  it("closes a group that stayed open through an interval without being touched", () => {
+    const restored = restoredExposureNames(session([
+      call("a", "GitHub"),
+      result("a"),
+      call("b", "Search"),
+      result("b"),
+      compaction(),
+      { type: "user/message", data: {} },
+      compaction(),
+    ]), { groups, keepAfterCompaction: 1 });
+    assert.deepEqual([...restored], []);
+  });
+
+  it("keeps a group used between the two compactions", () => {
+    const restored = restoredExposureNames(session([
+      call("a", "GitHub"),
+      result("a"),
+      call("b", "Search"),
+      result("b"),
+      compaction(),
+      memberCall("use", "web_search"),
+      result("use"),
+      compaction(),
+    ]), { groups, keepAfterCompaction: 1 });
+    assert.deepEqual([...restored], ["Search"]);
+  });
+
+  it("keeps a group opened between the two compactions", () => {
+    const restored = restoredExposureNames(session([
+      call("a", "GitHub"),
+      result("a"),
+      call("b", "Search"),
+      result("b"),
+      compaction(),
+      call("c", "Browser"),
+      result("c"),
+      compaction(),
+    ]), { groups, keepAfterCompaction: 1 });
+    assert.deepEqual([...restored], ["Browser"]);
+  });
+
+  it("applies the limit per interval with several groups", () => {
+    const restored = restoredExposureNames(session([
+      call("a", "GitHub"),
+      result("a"),
+      call("b", "Search"),
+      result("b"),
+      call("c", "Browser"),
+      result("c"),
+      compaction(),
+      // Search and Browser were retired by the first cut; GitHub is reopened.
+      call("d", "GitHub"),
+      result("d"),
+      compaction(),
+    ]), { groups, keepAfterCompaction: 2 });
+    assert.deepEqual([...restored], ["GitHub"]);
+  });
+
+  it("ignores failed member calls and failed compactions", () => {
+    const restored = restoredExposureNames(session([
+      call("a", "GitHub"),
+      result("a"),
+      call("b", "Search"),
+      result("b"),
+      memberCall("use", "github_issue"),
+      result("use", true),
+      compaction("summary failed"),
+    ]), { groups, keepAfterCompaction: 1 });
+    assert.deepEqual([...restored], ["GitHub", "Search"]);
+  });
+
+  it("drops names that no longer name a group, and their slots", () => {
+    const repaired = restoredExposureNames(session([
+      call("a", "Removed"),
+      result("a"),
+      call("b", "GitHub"),
+      result("b"),
+      compaction(),
+    ]), { groups, keepAfterCompaction: 1 });
+    assert.deepEqual([...repaired], ["GitHub"]);
+  });
+
+  it("counts PTC dispatches for opening and for using a group", () => {
+    const restored = restoredExposureNames(session([
+      ptc("GitHub"),
+      ptc("Search"),
+      memberPtc("web_search"),
+      memberPtc("github_issue", true),
+      compaction(),
+    ]), { groups, keepAfterCompaction: 1 });
+    assert.deepEqual([...restored], ["Search"]);
+  });
+
+  it("reopens a group by touching it again after it was pruned", () => {
+    const restored = restoredExposureNames(session([
+      call("a", "GitHub"),
+      result("a"),
+      call("b", "Search"),
+      result("b"),
+      compaction(),
+      call("c", "GitHub"),
+      result("c"),
+    ]), { groups, keepAfterCompaction: 1 });
+    assert.deepEqual([...restored], ["Search", "GitHub"]);
+  });
+
+  it("keeps the raw names when no groups are supplied", () => {
+    const restored = restoredExposureNames(session([
+      call("a", "GitHub"),
+      result("a"),
+      call("b", "Unknown"),
+      result("b"),
+      memberCall("use", "github_issue"),
+      result("use"),
+      compaction(),
+    ]));
+    assert.deepEqual([...restored], ["GitHub", "Unknown"]);
   });
 });

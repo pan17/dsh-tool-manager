@@ -99,11 +99,23 @@ export function normalizePresetPolicy(value: unknown): PresetToolPolicy {
   }
 
   const mode = record?.mode === "mcp" ? "mcp" as const : undefined;
+  const keepAfterCompaction = keepCountOf(record?.keepAfterCompaction);
   return {
     disabled,
     groups,
     ...(mode === undefined ? {} : { mode }),
+    ...(keepAfterCompaction === undefined ? {} : { keepAfterCompaction }),
   };
+}
+
+/**
+ * A whole, non-negative count of groups, or `undefined` when the value cannot
+ * express one. `0` is meaningful ("keep none"), so only absence and invalid
+ * values fall back to the unlimited default.
+ */
+function keepCountOf(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) return undefined;
+  return value;
 }
 
 /** Whether this preset loads tools MCP-style instead of by on-demand groups. */

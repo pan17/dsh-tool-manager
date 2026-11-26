@@ -96,6 +96,9 @@ window.__ModuleLoader__.load({
 				})),
 			};
 			if (policy.mode === "mcp") payload.mode = "mcp";
+			if (typeof policy.keepAfterCompaction === "number") {
+				payload.keepAfterCompaction = policy.keepAfterCompaction;
+			}
 			return payload;
 		}
 		/**
@@ -112,7 +115,8 @@ window.__ModuleLoader__.load({
 		 * groups it owns (tool_list in default mode, tool_find in mcp mode), so
 		 * it belongs to the target. Rebuilding the policy used to omit `mode`,
 		 * which silently turned an MCP 按需 target back into default mode after
-		 * a copy.
+		 * a copy. The compaction keep limit is policy rather than loading
+		 * semantics, so it follows the groups: the target is overwritten whole.
 		 */
 		function copyPresetPolicy(sourcePreset, targetPreset) {
 			const sourceTools = sourcePreset.tools || [];
@@ -142,19 +146,38 @@ window.__ModuleLoader__.load({
 				});
 			}
 			const mode = targetPreset.policy && targetPreset.policy.mode === "mcp" ? "mcp" : undefined;
-			return { disabled, groups, ...(mode ? { mode } : {}), skippedGroups };
+			const keep = typeof sourcePolicy.keepAfterCompaction === "number"
+				? sourcePolicy.keepAfterCompaction
+				: undefined;
+			return {
+				disabled,
+				groups,
+				...(mode ? { mode } : {}),
+				...(keep === undefined ? {} : { keepAfterCompaction: keep }),
+				skippedGroups,
+			};
 		}
 		/**
 		 * The empty policy a Preset resets to.
 		 *
 		 * Loading mode survives a reset for the same reason it survives a copy:
 		 * it is a Preset-level choice, not one of the groups being cleared.
+		 * The compaction keep limit is the same kind of choice — it says how
+		 * opened groups age, not which groups exist — so reset keeps it too.
 		 * Dropping it flipped an MCP 按需 Preset back to default mode and
 		 * re-registered the discovery tool the Preset had switched away from.
 		 */
 		function resetPresetPolicy(policy) {
 			const mode = policy && policy.mode === "mcp" ? "mcp" : undefined;
-			return { disabled: [], groups: [], ...(mode ? { mode } : {}) };
+			const keep = policy && typeof policy.keepAfterCompaction === "number"
+				? policy.keepAfterCompaction
+				: undefined;
+			return {
+				disabled: [],
+				groups: [],
+				...(mode ? { mode } : {}),
+				...(keep === undefined ? {} : { keepAfterCompaction: keep }),
+			};
 		}
 		function settingsPayload(value) {
 			const settings = { presets: {} };
@@ -610,6 +633,22 @@ window.__ModuleLoader__.load({
 			"注意：MCP 按需依赖模型能够直接发出未声明的工具名。部分供应商会限制工具调用名（例如 OpenCode Go），模型只能反复调用 tool_find，无法真正调用组内工具；遇到这种情况请改用「默认」加载模式。",
 		].join("\n");
 
+		// How a completed compaction treats the groups this Session opened. The
+		// default is deliberately "keep everything": compaction must not surprise
+		// a reader who never configured this, and only the default mode has an
+		// open state to begin with.
+		const KEEP_AFTER_COMPACTION_HELP = [
+			"默认全部保留：会话压缩不会改变已经打开的按需组。",
+			"",
+			"填一个数字后，每次会话压缩成功结束（自动压缩或 /compact）时，只保留最近使用的 N 个已打开的按需组，其余重新收起；模型可以再用 tool_list 打开。",
+			"",
+			"「最近使用」只看上一次压缩之后到这一次压缩之间的区间：组内工具有过成功调用，或组在此期间被打开/重新打开；只是闲置跨过压缩的组会被关闭，若这一区间没有任何组被打开/使用，压缩后可以一个组都不保留。压缩之后才打开的组不受这一次裁剪影响。",
+			"",
+			"0 表示压缩后全部关闭；留空表示不限制。",
+			"",
+			"只在「默认」加载模式下生效：MCP 按需模式没有打开状态。随页面「保存」写入。",
+		].join("\n");
+
 		// The generation model is a global choice, not a Preset one: auto-naming
 		// and auto-grouping classify tools and print JSON, so a fast model is
 		// usually enough even when the conversation runs a slow reasoning one.
@@ -732,6 +771,31 @@ window.__ModuleLoader__.load({
 			}
 
 			/**
+			 * Set how many opened groups survive a completed compaction.
+			 *
+			 * A controlled text input rather than `type=number`: the latter
+			 * reports an empty value for half-typed text ("1e"), which would
+			 * silently clear the setting while the reader is still typing. Only
+			 * digits are accepted, and an empty field means the unlimited
+			 * default.
+			 */
+			function setCompactionKeep(value) {
+				const text = String(value || "").trim();
+				if (text === "") {
+					mutatePreset((target) => {
+						delete target.policy.keepAfterCompaction;
+					});
+					return;
+				}
+				if (!/^\d+$/.test(text)) return;
+				const count = Number(text);
+				if (!Number.isSafeInteger(count) || count > 999) return;
+				mutatePreset((target) => {
+					target.policy.keepAfterCompaction = count;
+				});
+			}
+
+			/**
 			 * Choose the shared generation model, or `null` to let the plugin pick.
 			 *
 			 * The choice is persisted right away — this setting belongs to no
@@ -843,7 +907,7 @@ window.__ModuleLoader__.load({
 
 			function resetPresetConfig() {
 				if (!hasPresetConfig) return;
-				if (!window.confirm("确定重置当前 Preset 的配置吗？这会清空它的全部按需组和已关闭工具，加载模式保持不变；只修改页面草稿，保存后生效。")) return;
+				if (!window.confirm("确定重置当前 Preset 的配置吗？这会清空它的全部按需组和已关闭工具，加载模式与「压缩后保留」保持不变；只修改页面草稿，保存后生效。")) return;
 				mutatePreset((target) => {
 					target.policy = resetPresetPolicy(target.policy);
 				});
@@ -1670,7 +1734,7 @@ window.__ModuleLoader__.load({
 						h("div", { className: "tm_modal_head" },
 							h("div", null,
 								h("h3", null, "复制当前 Preset 配置"),
-								h("div", { className: "tm_muted" }, "将当前 Preset 的全部按需组和已关闭工具复制到勾选的 Preset；加载模式不跟随复制，各 Preset 保持自己的「默认 / MCP 按需」设置；只改页面草稿，保存后生效。"),
+								h("div", { className: "tm_muted" }, "将当前 Preset 的全部按需组和已关闭工具复制到勾选的 Preset；加载模式不跟随复制，「压缩后保留最近使用的按需组」会随分组一起复制；只改页面草稿，保存后生效。"),
 							),
 							h("button", { className: "tm_btn", onClick: () => setCopyDialog(null) }, "关闭"),
 						),
@@ -1680,7 +1744,7 @@ window.__ModuleLoader__.load({
 								+ (copySource.policy.mode === "mcp" ? "MCP 按需" : "默认") + "）："
 								+ (copySource.policy.groups || []).length + " 个按需组、"
 								+ (copySource.policy.disabled || []).length + " 个已关闭工具。"
-								+ "勾选的目标 Preset 现有分组和关闭项将被整份覆盖，加载模式不变。",
+								+ "勾选的目标 Preset 现有分组和关闭项将被整份覆盖，加载模式不变，「压缩后保留」跟随源 Preset。",
 							),
 							h("div", { className: "tm_row" },
 								h("button", {
@@ -1704,6 +1768,9 @@ window.__ModuleLoader__.load({
 												? "；跳过 " + preview.skippedGroups.length + " 个组：" + preview.skippedGroups.join("、")
 												: "")
 											+ "；加载模式保持「" + targetMode + "」"
+											+ "；压缩后保留 " + (typeof preview.keepAfterCompaction === "number"
+												? preview.keepAfterCompaction + " 个"
+												: "全部")
 											+ ((target.tools || []).length === 0 ? "；目标没有可见工具，复制后配置为空" : "");
 									return h("label", { className: "tm_pick", key: target.id },
 										h("input", {
@@ -1780,10 +1847,31 @@ window.__ModuleLoader__.load({
 							? h("span", { className: "tm_badge ptc", title: "本 Preset 走 PTC：工具以一份生成的 TypeScript SDK 注入系统提示词，token 按该文本 ÷4 估算（含 run_code 调用声明、PTC 指令段与 SDK 脚手架）" }, "PTC")
 							: h("span", { className: "tm_badge native", title: "本 Preset 走原生 tool-calling：工具以 JSON schema 随请求发送，token 按 JSON ÷4 估算" }, "原生"),
 				),
-				h("div", { className: "tm_row", style: { padding: "0 14px 10px" } },
+				h("div", { className: "tm_row", style: { padding: "0 14px" } },
 					h("span", { className: "tm_muted", style: { position: "relative" } }, "加载模式", h("span", { className: "tm_help", tabIndex: 0, "aria-label": "加载模式说明", "data-tip": LOADING_MODE_HELP }, "?")),
 					h("button", { className: "tm_chip" + (mcpMode ? "" : " active"), onClick: () => setMode("groups") }, "默认"),
 					h("button", { className: "tm_chip" + (mcpMode ? " active" : ""), onClick: () => setMode("mcp") }, "MCP 按需"),
+				),
+				mcpMode ? null : h("div", { className: "tm_row", style: { padding: "0 14px" } },
+					h("span", { className: "tm_muted", style: { position: "relative" } },
+						"压缩后保留最近使用的按需组",
+						h("span", { className: "tm_help", tabIndex: 0, "aria-label": "压缩后保留说明", "data-tip": KEEP_AFTER_COMPACTION_HELP }, "?"),
+					),
+					h("input", {
+						className: "tm_input",
+						style: { maxWidth: "120px", flex: "0 0 120px" },
+						type: "text",
+						inputMode: "numeric",
+						"aria-label": "压缩后保留最近使用的按需组数量",
+						value: typeof preset.policy.keepAfterCompaction === "number"
+							? String(preset.policy.keepAfterCompaction)
+							: "",
+						placeholder: "全部",
+						disabled: autoGrouping,
+						title: "留空＝全部保留；0＝压缩后全部关闭；N＝只保留最近使用的 N 个",
+						onChange: (event) => setCompactionKeep(event.target.value),
+					}),
+					h("span", { className: "tm_muted" }, "留空＝全部保留"),
 				),
 				preset.broken ? h("div", { className: "tm_error" }, preset.broken) : null,
 				autoGroupError ? h("div", { className: "tm_error" }, autoGroupError) : null,
@@ -1801,7 +1889,7 @@ window.__ModuleLoader__.load({
 								onClick: resetPresetConfig,
 								disabled: autoGrouping || busy || !draft.writable || !hasPresetConfig,
 								title: hasPresetConfig
-									? "清空当前 Preset 的全部按需组和已关闭工具（加载模式保持不变）"
+									? "清空当前 Preset 的全部按需组和已关闭工具（加载模式与压缩后保留保持不变）"
 									: "当前 Preset 没有可重置的配置",
 							}, "重置配置"),
 							h("button", {
@@ -1809,7 +1897,7 @@ window.__ModuleLoader__.load({
 								onClick: openCopyDialog,
 								disabled: autoGrouping || busy || !draft.writable || !hasPresetConfig || copyTargetCount === 0,
 								title: hasPresetConfig
-									? "把当前 Preset 的分组和已关闭工具复制到其他 Preset（加载模式不复制）"
+									? "把当前 Preset 的分组和已关闭工具复制到其他 Preset（加载模式不复制；压缩后保留会复制）"
 									: "当前 Preset 没有可复制的分组或已关闭工具",
 							}, "复制配置"),
 						),

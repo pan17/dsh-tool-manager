@@ -23,6 +23,18 @@ export interface PresetToolPolicy {
   groups: ToolGroupPolicy[];
   /** Tool-loading mode; absent means the historical "groups" mode. */
   mode?: "groups" | "mcp";
+  /**
+   * On-demand groups kept open after a completed compaction.
+   *
+   * Absent keeps every group this Session ever opened, which is the historical
+   * behaviour. `0` closes them all at each completed compaction; `N` keeps the
+   * N most recently touched ones. Recency is scoped to the current compaction
+   * interval: groups only survive when opened, reopened or used since the
+   * previous compaction, so a group that merely stayed open is closed at the
+   * next one. Only the default (groups) mode has an open state, so mcp mode
+   * ignores it.
+   */
+  keepAfterCompaction?: number;
 }
 
 /** One provider route, model id, and optional adapter-owned reasoning effort. */

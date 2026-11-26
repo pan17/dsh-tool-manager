@@ -185,6 +185,7 @@ interface ToolManagerSettings {
 
 - `tool_list({ group: "GitHub MCP" })`：按名称打开该组，该组全部工具立刻可用，直到当前 Agent 结束或该组被删掉；
 - 每个 Agent 独立应用打开状态，不跨会话共享；成功调用由 Session 事件日志持久记录，同一 Session 重启恢复时重建状态；
+- 默认模式下可配置 `keepAfterCompaction`：每个成功结束的 `compaction/end`（无 `error`）把打开集合收窄到最近使用的 N 个，其余重新收起。最近使用按组内工具最后一次成功调用排序（原生 `tool/call`+`tool/result`，PTC `tool/ptc-dispatch`），从未调用过的组按最后一次成功 `tool_list` 的时间排序；**排序只在当前压缩区间内进行**：只有在上一次压缩之后被打开/重新打开或使用过的组才是候选，跨区间闲置的组会被关闭，`0` 即每次全部关闭。省略＝不裁剪。折叠在整段日志上一次完成（而非增量修补），因此重启恢复、fork 前缀与在线裁剪得到同一结果；裁剪后下一条目录消息会说明「压缩后早先打开的组已被重置」。收窄必须在 `session/event` 收到 `compaction/end` 时立即执行：DSH 的 `agent-loop` 在 `agent/pre-step` **之前**调用 `tools.resolve()`，若只挂在 pre-step，压缩后的第一个请求仍会按旧集合声明工具（首版实测即为此现象）；`tools.resolve()` 的包装器也再调用一次作为兜底，游标保证不重复计算。MCP 模式没有打开状态，不应用该策略；
 - `tool_list` 注册在 host 全局层，这样 PTC 生成 SDK 能绑定它；没有按需组的 Preset 用 restriction 隐藏；
 - PTC 模式应在 `run_code` 内调用 `await tools.tool_list({ group })`；
 - 按需组说明不走 `systemPrompt.section`。所有 Preset（含极简模式的 `complete: true` persona）都在 `agent/pre-step` 写入一条 skill 式的持久 user 角色 `<system-reminder>` 目录；目录为每组列出实际工具数量和完整工具名；

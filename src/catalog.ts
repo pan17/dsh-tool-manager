@@ -13,6 +13,12 @@ export interface CatalogEntry {
 export interface CatalogHistory {
   published: boolean;
   visibleDigest?: string;
+  /**
+   * Set when a compaction narrowed the opened groups: the catalog itself did
+   * not change, but the model has to be told that reopened names were reset, so
+   * the same catalog is published again with one extra sentence.
+   */
+  reset?: boolean;
 }
 
 export interface CatalogUserMessage {
@@ -51,7 +57,7 @@ export function digestCatalogEntries(entries: readonly CatalogEntry[]): string {
   return createHash("sha256").update(canonical).digest("hex");
 }
 
-export function renderCatalogText(entries: readonly CatalogEntry[], update: boolean): string {
+export function renderCatalogText(entries: readonly CatalogEntry[], update: boolean, reset = false): string {
   const body = [
     "<available_tool_groups>",
     ...entries.map(renderCatalogLine),
@@ -82,6 +88,11 @@ export function renderCatalogText(entries: readonly CatalogEntry[], update: bool
     ...body,
     "",
     ...availability,
+    ...(reset
+      ? [
+          `The session was compacted, so some groups opened earlier were reset. Call ${DISCOVERY_TOOL_NAME}({ group: "<name>" }) again to reopen one.`,
+        ]
+      : []),
     "</system-reminder>",
   ].join("\n");
 }
@@ -89,11 +100,12 @@ export function renderCatalogText(entries: readonly CatalogEntry[], update: bool
 export function renderCatalogMessage(
   entries: readonly CatalogEntry[],
   update: boolean,
+  reset = false,
 ): CatalogUserMessage {
   const message: CatalogUserMessage = {
     id: randomUUID(),
     role: "user",
-    content: [{ type: "text", text: renderCatalogText(entries, update) }],
+    content: [{ type: "text", text: renderCatalogText(entries, update, reset) }],
     source: {
       kind: CATALOG_SOURCE_KIND,
       form: "catalog",
@@ -173,18 +185,21 @@ export function applyCatalogDecision<T>(
   const messages = decision.messages;
   const digest = digestCatalogEntries(entries);
   const existing = catalogMessage(messages);
-  if (history.visibleDigest === digest) {
+  // A reset publishes the catalog again on purpose: the digest is unchanged,
+  // but the model has to learn that groups it opened earlier were closed.
+  const reset = history.reset === true;
+  if (!reset && history.visibleDigest === digest) {
     return existing === undefined
       ? decision
       : { ...decision, messages: messages.filter((message) => message.id !== existing.message.id) };
   }
-  if (existing !== undefined && digestCatalogEntries(existing.entries) === digest) return decision;
+  if (!reset && existing !== undefined && digestCatalogEntries(existing.entries) === digest) return decision;
   if (!history.published && entries.length === 0) {
     return existing === undefined
       ? decision
       : { ...decision, messages: messages.filter((message) => message.id !== existing.message.id) };
   }
-  const catalog = renderCatalogMessage(entries, history.published);
+  const catalog = renderCatalogMessage(entries, history.published, reset);
   return {
     ...decision,
     messages: existing === undefined

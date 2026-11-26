@@ -1401,3 +1401,254 @@ describe("family-named prompt sections", () => {
     await runtime.dispose();
   });
 });
+
+describe("a compaction keep limit", () => {
+  function compaction(error) {
+    return { type: "compaction/end", data: error === undefined ? { turn: 1 } : { turn: 1, error } };
+  }
+
+  function open(callId, groupName) {
+    return [
+      { type: "tool/call", data: { callId, name: "tool_list", arguments: JSON.stringify({ group: groupName }) } },
+      {
+        type: "tool/result",
+        data: {
+          message: {
+            role: "tool",
+            source: { kind: "tool", callId },
+            toolCallId: callId,
+            content: [{ type: "text", text: "{}" }],
+            isError: false,
+          },
+        },
+      },
+    ];
+  }
+
+  function memberUse(callId, name) {
+    return [
+      { type: "tool/call", data: { callId, name, arguments: "{}" } },
+      {
+        type: "tool/result",
+        data: {
+          message: {
+            role: "tool",
+            source: { kind: "tool", callId },
+            toolCallId: callId,
+            content: [{ type: "text", text: "{}" }],
+            isError: false,
+          },
+        },
+      },
+    ];
+  }
+
+  function host(events, policy) {
+    const schema = (name) => ({ name, description: name, parameters: {} });
+    const names = ["read", "github_issue", "web_search"];
+    let restricted = new Set();
+    let guard;
+    const listeners = new Map();
+    const log = [...events];
+    const surface = { nodes: [] };
+    const visible = () => names.filter((name) => !restricted.has(name)).map(schema);
+    const scopedTools = {
+      schemas: visible,
+      register: () => () => {},
+      restrict({ deny }) {
+        restricted = new Set(deny);
+        return () => { restricted = new Set(); };
+      },
+      guard(callback) {
+        guard = callback;
+        return () => {};
+      },
+    };
+    const agent = {
+      id: "session-compact",
+      ctx: {
+        get: (name) => (name === "tools" ? scopedTools : undefined),
+        on: () => () => {},
+      },
+      session: {
+        get seq() { return log.length; },
+        eventAt: (seq) => (log[seq] === undefined ? undefined : { seq, ...log[seq] }),
+        surface,
+      },
+    };
+    const hostTools = {
+      schemas: visible,
+      register: () => () => {},
+      restrict: () => () => {},
+      async resolve() {
+        return { dispose() {}, view: () => new Map(visible().map((item) => [item.name, item])) };
+      },
+    };
+    const context = {
+      get(name) {
+        if (name === "tools") return hostTools;
+        if (name === "agents") return { list: () => [agent] };
+        return undefined;
+      },
+      on(event, listener) {
+        listeners.set(event, [...(listeners.get(event) ?? []), listener]);
+        return () => {};
+      },
+    };
+    return {
+      agent,
+      context,
+      hostTools,
+      settings: { presets: { standard: policy } },
+      get guard() {
+        return guard;
+      },
+      get restricted() {
+        return [...restricted];
+      },
+      preStep() {
+        return listeners.get("agent/pre-step")[0];
+      },
+      sessionEvent() {
+        return listeners.get("session/event")[0];
+      },
+      append(next, visibleSurface = false) {
+        const start = log.length;
+        log.push(...next);
+        if (visibleSurface) {
+          for (let seq = start; seq < log.length; seq += 1) surface.nodes.push(seq);
+        }
+      },
+    };
+  }
+
+  const presets = { composedPreset: () => "standard" };
+  const groups = [
+    { name: "GitHub", patterns: ["github_*"] },
+    { name: "Search", patterns: ["web_*"] },
+  ];
+
+  it("restores only the recently used group after a recorded compaction", async () => {
+    const h = host(
+      [...open("a", "GitHub"), ...open("b", "Search"), ...memberUse("use", "web_search"), compaction()],
+      { disabled: [], groups, keepAfterCompaction: 1 },
+    );
+    const runtime = new ToolPolicyRuntime(h.context, presets, h.settings);
+    runtime.start();
+
+    assert.deepEqual(h.restricted, ["github_issue"], "only the most recently used group stays open");
+    assert.equal(h.guard({ name: "web_search" }), undefined);
+    assert.match(h.guard({ name: "github_issue" }), /belongs to on-demand group "GitHub"/);
+    await runtime.dispose();
+  });
+
+  it("narrows the live set when a compaction lands between steps", async () => {
+    const h = host([...open("a", "GitHub"), ...open("b", "Search")], {
+      disabled: [],
+      groups,
+      keepAfterCompaction: 1,
+    });
+    const runtime = new ToolPolicyRuntime(h.context, presets, h.settings);
+    runtime.start();
+    assert.deepEqual(h.restricted, [], "both groups are open before the compaction");
+
+    const first = await h.preStep()({ agent: h.agent }, () => ({ kind: "enter", messages: [] }));
+    assert.deepEqual(h.restricted, []);
+    const firstCatalog = first.messages.find((message) => message.source?.kind === "tool-manager-catalog");
+    assert.ok(firstCatalog, "the step sees the group catalog");
+    // The step's messages reach the Session log; the surface makes the catalog
+    // visible, so nothing would republish it without the reset.
+    h.append([{ type: "user/message", data: firstCatalog }], true);
+
+    h.append([compaction()]);
+    const second = await h.preStep()({ agent: h.agent }, () => ({ kind: "enter", messages: [] }));
+
+    assert.deepEqual(h.restricted, ["github_issue"], "the older group is closed again");
+    assert.equal(h.guard({ name: "web_search" }), undefined);
+    assert.match(h.guard({ name: "github_issue" }), /call tool_list with \{"group":"GitHub"\}/);
+    const resetCatalog = second.messages.find((message) => message.source?.kind === "tool-manager-catalog");
+    assert.ok(resetCatalog, "the catalog is republished even though its entries did not change");
+    assert.match(resetCatalog.content[0].text, /The session was compacted, so some groups opened earlier were reset/);
+    h.append([{ type: "user/message", data: resetCatalog }], true);
+
+    // The explanation is one shot: the following step has nothing new to say.
+    const third = await h.preStep()({ agent: h.agent }, () => ({ kind: "enter", messages: [] }));
+    assert.equal(
+      third.messages.some((message) => message.source?.kind === "tool-manager-catalog"),
+      false,
+    );
+    await runtime.dispose();
+  });
+
+  it("narrows the step set resolved before pre-step, which is the real loop order", async () => {
+    // `agent/pre-step` runs AFTER `tools.resolve()`: the request that follows a
+    // `/compact` must already see the narrowed set, or the model keeps both
+    // groups for one more step.
+    const h = host([...open("a", "GitHub"), ...open("b", "Search")], {
+      disabled: [],
+      groups,
+      keepAfterCompaction: 1,
+    });
+    const runtime = new ToolPolicyRuntime(h.context, presets, h.settings);
+    runtime.start();
+
+    h.append([compaction()]);
+    const set = await h.hostTools.resolve({ agent: h.agent });
+    assert.deepEqual([...set.view().keys()], ["read", "web_search"], "the older group is gone from the resolved set");
+    await runtime.dispose();
+  });
+
+  it("narrows from the compaction event before any step resolves", async () => {
+    const h = host([...open("a", "GitHub"), ...open("b", "Search")], {
+      disabled: [],
+      groups,
+      keepAfterCompaction: 1,
+    });
+    const runtime = new ToolPolicyRuntime(h.context, presets, h.settings);
+    runtime.start();
+    assert.deepEqual(h.restricted, [], "both groups are open before the compaction");
+
+    h.append([compaction()]);
+    h.sessionEvent()(h.agent.session, { type: "compaction/end", seq: 4, data: {} });
+
+    assert.deepEqual(h.restricted, ["github_issue"], "the event itself closes the older group");
+    assert.equal(h.guard({ name: "web_search" }), undefined);
+    await runtime.dispose();
+  });
+
+  it("closes a kept group when the next interval passes without touching it", async () => {
+    const h = host([...open("a", "GitHub"), ...open("b", "Search")], {
+      disabled: [],
+      groups,
+      keepAfterCompaction: 1,
+    });
+    const runtime = new ToolPolicyRuntime(h.context, presets, h.settings);
+    runtime.start();
+
+    h.append([compaction()]);
+    const first = await h.hostTools.resolve({ agent: h.agent });
+    assert.deepEqual([...first.view().keys()], ["read", "web_search"], "the first cut keeps the most recent group");
+
+    h.append([compaction()]);
+    const second = await h.hostTools.resolve({ agent: h.agent });
+    assert.deepEqual([...second.view().keys()], ["read"], "the next interval retires the untouched group");
+    assert.deepEqual(h.restricted, ["github_issue", "web_search"]);
+    await runtime.dispose();
+  });
+
+  it("ignores the limit in mcp mode, which has no open state", async () => {
+    const h = host([...open("a", "GitHub"), compaction()], {
+      disabled: [],
+      groups,
+      mode: "mcp",
+      keepAfterCompaction: 0,
+    });
+    const runtime = new ToolPolicyRuntime(h.context, presets, h.settings);
+    runtime.start();
+    await h.preStep()({ agent: h.agent }, () => ({ kind: "enter", messages: [] }));
+
+    assert.deepEqual(h.restricted, []);
+    assert.equal(h.guard({ name: "github_issue" }), undefined);
+    await runtime.dispose();
+  });
+});

@@ -255,3 +255,32 @@ describe("tool-manager policy", () => {
     ), []);
   });
 });
+
+describe("compaction keep limit", () => {
+  it("keeps a non-negative whole count and drops everything else", () => {
+    const kept = normalizeSettings({
+      presets: {
+        standard: { disabled: [], groups: [], keepAfterCompaction: 0 },
+        minimal: { disabled: [], groups: [], keepAfterCompaction: 3 },
+      },
+    });
+    assert.deepEqual(kept, {
+      presets: {
+        standard: { disabled: [], groups: [], keepAfterCompaction: 0 },
+        minimal: { disabled: [], groups: [], keepAfterCompaction: 3 },
+      },
+    });
+
+    for (const bad of [-1, 1.5, "3", null, {}, Number.NaN, Number.POSITIVE_INFINITY, true]) {
+      assert.deepEqual(
+        normalizeSettings({ presets: { standard: { disabled: [], groups: [], keepAfterCompaction: bad } } }),
+        { presets: { standard: { disabled: [], groups: [] } } },
+      );
+    }
+
+    // An older config without the key keeps working and stays clean.
+    assert.deepEqual(normalizeSettings({ presets: { standard: { disabled: [], groups: [] } } }), {
+      presets: { standard: { disabled: [], groups: [] } },
+    });
+  });
+});

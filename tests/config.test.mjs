@@ -33,6 +33,7 @@ describe("tool-manager config store", () => {
           standard: {
             disabled: ["read", "read"],
             groups: [{ name: "Web", patterns: ["web_*"] }],
+            keepAfterCompaction: 2,
           },
         },
       }, 0);

@@ -229,3 +229,35 @@ describe("tool-manager catalog", () => {
     assert.equal(applyCatalogDecision(reject, catalogEntriesFromGroups(groups), { published: false }), reject);
   });
 });
+
+describe("a compaction reset", () => {
+  it("republishes an unchanged catalog with the reset explanation", () => {
+    const entries = catalogEntriesFromGroups(groups);
+    const existing = renderCatalogMessage(entries, true);
+    const history = { published: true, visibleDigest: digestCatalogEntries(entries) };
+
+    const withoutReset = applyCatalogDecision(
+      { kind: "enter", messages: [{ id: "u9", source: { kind: "user" } }, existing] },
+      entries,
+      history,
+    );
+    assert.equal(withoutReset.messages.length, 1, "a visible unchanged catalog stays in history");
+
+    const reset = applyCatalogDecision(
+      { kind: "enter", messages: [{ id: "u9", source: { kind: "user" } }, existing] },
+      entries,
+      { ...history, reset: true },
+    );
+    assert.equal(reset.messages.length, 2, "the reset publishes the catalog again");
+    assert.notEqual(reset.messages[1]?.id, existing.id);
+    assert.equal(reset.messages[1]?.source.update, true);
+    assert.match(reset.messages[1]?.content[0]?.text ?? "", /The session was compacted, so some groups opened earlier were reset/);
+    assert.match(reset.messages[1]?.content[0]?.text ?? "", /Call tool_list/);
+  });
+
+  it("keeps the explanation out of the first publication", () => {
+    const text = renderCatalogText(catalogEntriesFromGroups(groups), false, true);
+    assert.doesNotMatch(text, /some groups opened earlier were reset/);
+    assert.doesNotMatch(text, /The session was compacted/);
+  });
+});

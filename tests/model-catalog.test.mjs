@@ -108,4 +108,25 @@ describe("settingsForSave", () => {
   it("does not invent a generation model when none was stored", () => {
     assert.deepEqual(settingsForSave({ presets: {} }, { presets: {} }), { presets: {} });
   });
+
+  it("stores the compaction keep limit the page sends and drops an invalid one", () => {
+    assert.deepEqual(settingsForSave({
+      presets: { standard: { disabled: [], groups: [], keepAfterCompaction: 2 } },
+      generation: null,
+    }, stored), {
+      presets: { standard: { disabled: [], groups: [], keepAfterCompaction: 2 } },
+    });
+    // The page always ships the whole Preset policy, so an absent field means
+    // "none" rather than "leave the stored one alone" — and 0 stays valid.
+    assert.deepEqual(settingsForSave({
+      presets: { standard: { disabled: [], groups: [], keepAfterCompaction: 0 } },
+    }, { presets: {} }).presets.standard, {
+      disabled: [],
+      groups: [],
+      keepAfterCompaction: 0,
+    });
+    assert.deepEqual(settingsForSave({
+      presets: { standard: { disabled: [], groups: [], keepAfterCompaction: -1 } },
+    }, { presets: {} }).presets.standard, { disabled: [], groups: [] });
+  });
 });
