@@ -59,11 +59,14 @@ export async function buildSnapshot(
       ? 0
       : Math.max(0, model.totalTokens - toolViews.reduce((sum, tool) => sum + (tool.tokens ?? 0), 0));
     const pricing = model === undefined ? undefined : { constantTokens };
+    const activeGroups = resolveActiveGroups(policy, names);
+    const activeTools = new Map(activeGroups.map((group) => [group.name, group.tools]));
     const tokenByGroup = new Map(
-      resolveActiveGroups(policy, names).map((group) => [group.name, estimateGroupTokens(group, toolViews)]),
+      activeGroups.map((group) => [group.name, estimateGroupTokens(group, toolViews)]),
     );
     const groupViews = resolveGroups(policy, names).map((group) => ({
       ...group,
+      tools: activeTools.get(group.name) ?? [],
       tokens: tokenByGroup.get(group.name) ?? { schema: 0, catalog: 0, net: 0 },
     }));
     views.push({

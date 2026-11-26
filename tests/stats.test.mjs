@@ -51,6 +51,23 @@ describe("tool-manager catalog stats", () => {
     });
   });
 
+  it("classifies always, on-demand, off, and group-disabled members", () => {
+    assert.deepEqual(toolCatalogStats(tools, {
+      disabled: ["old"],
+      groups: [
+        { name: "Always", patterns: ["read", "write"], loading: "always", disabled: ["write"] },
+        { name: "OnDemand", patterns: ["web_*"] },
+        { name: "Off", patterns: ["missing_*"], loading: "off" },
+      ],
+    }), {
+      totalTools: 5,
+      groupCount: 3,
+      ungroupedTools: 1,
+      onDemandTools: 2,
+      disabledTools: 2,
+    });
+  });
+
   it("handles an empty preset and configured empty groups", () => {
     assert.deepEqual(toolCatalogStats([], {
       disabled: ["missing"],
@@ -126,6 +143,24 @@ describe("tool-manager token estimates", () => {
     assert.equal(stats.onDemandSavings, group.net);
     assert.equal(stats.disabledTools, 1);
     assert.equal(stats.disabledTokens, estimateToolsTokens([schemas[3]]));
+  });
+
+  it("separates always, on-demand, off, and group-disabled tools in token stats", () => {
+    const policy = {
+      disabled: ["old"],
+      groups: [
+        { name: "Always", patterns: ["read"], loading: "always" },
+        { name: "OnDemand", patterns: ["web_*"], disabled: ["web_search"] },
+        { name: "Off", patterns: ["missing_*"], loading: "off" },
+      ],
+    };
+    const stats = presetTokenStats(schemas, policy);
+    assert.equal(stats.alwaysOnTools, 1);
+    assert.equal(stats.alwaysOnTokens, estimateToolsTokens([schemas[0]]));
+    assert.equal(stats.onDemandTools, 1);
+    assert.equal(stats.onDemandGroups, 1);
+    assert.equal(stats.disabledTools, 2);
+    assert.equal(stats.disabledTokens, estimateToolsTokens([schemas[1], schemas[3]]));
   });
 
   it("prices a transport that renders one document per tool plus a fixed floor", () => {

@@ -137,6 +137,52 @@ describe("snapshot schema merging", () => {
     });
   });
 
+  it("reflects always and off group loading in group views and token stats", async () => {
+    const presets = {
+      async compositionInventory() {
+        return [{ id: "standard", isDefault: true }];
+      },
+      async acquireScope() {
+        return { key: "standing-standard", async [Symbol.asyncDispose]() {} };
+      },
+    };
+    const catalog = [schema("read", "Read a file"), schema("old", "Old tool")];
+    const tools = { schemas: () => catalog };
+    const settings = {
+      presets: {
+        standard: {
+          disabled: [],
+          groups: [
+            { name: "Always", patterns: ["read"], loading: "always" },
+            { name: "Off", patterns: ["old"], loading: "off", disabled: [] },
+          ],
+        },
+      },
+    };
+
+    const snapshot = await buildSnapshot(presets, tools, settings, 1, "/tmp/tool-manager.json");
+    const preset = snapshot.presets[0];
+    assert.equal(preset.groups[0].loading, "always");
+    assert.deepEqual(preset.groups[0].tokens, {
+      schema: estimateToolTokens(catalog[0]),
+      catalog: 0,
+      net: estimateToolTokens(catalog[0]),
+    });
+    assert.equal(preset.groups[1].loading, "off");
+    assert.deepEqual(preset.groups[1].tokens, { schema: 0, catalog: 0, net: 0 });
+    assert.deepEqual(preset.tokenStats, {
+      totalTokens: estimateToolsTokens(catalog),
+      alwaysOnTools: 1,
+      alwaysOnTokens: estimateToolsTokens([catalog[0]]),
+      onDemandTools: 0,
+      onDemandTokens: 0,
+      onDemandGroups: 0,
+      onDemandSavings: 0,
+      disabledTools: 1,
+      disabledTokens: estimateToolsTokens([catalog[1]]),
+    });
+  });
+
   it("prices a PTC preset from the rendered SDK text and reconciles the total", async () => {
     const presets = {
       async compositionInventory() {

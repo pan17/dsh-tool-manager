@@ -1,5 +1,5 @@
 import { renderCatalogLine } from "./catalog.js";
-import { matchesPattern, resolveActiveGroups } from "./policy.js";
+import { groupForTool, matchesPattern, resolveActiveGroups } from "./policy.js";
 import type {
   PresetTokenStats,
   PresetToolPolicy,
@@ -12,6 +12,7 @@ export type { PresetTokenStats, ToolTokenEstimate } from "./types.js";
 export interface ToolCatalogStats {
   totalTools: number;
   groupCount: number;
+  /** Resident tools that are not part of an on-demand group; includes `always` groups. */
   ungroupedTools: number;
   onDemandTools: number;
   disabledTools: number;
@@ -54,16 +55,23 @@ export function estimateToolsTokens(tools: readonly TokenSchema[]): number {
  * sides are zero rather than a negative saving.
  */
 export function estimateGroupTokens(
-  group: { name: string; description?: string; tools: readonly string[] },
+  group: {
+    name: string;
+    description?: string;
+    tools: readonly string[];
+    loading?: "always" | "ondemand" | "off";
+  },
   tools: readonly TokenSchema[],
 ): ToolTokenEstimate {
-  if (group.tools.length === 0) return { schema: 0, catalog: 0, net: 0 };
+  if (group.tools.length === 0 || group.loading === "off") return { schema: 0, catalog: 0, net: 0 };
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
   let schema = 0;
   for (const name of group.tools) {
     const tool = byName.get(name);
     if (tool) schema += residentTokens(tool);
   }
+  // `always` groups have no catalog line: their schemas are simply resident.
+  if (group.loading === "always") return { schema, catalog: 0, net: schema };
   const catalog = Math.ceil(renderCatalogLine({
     name: group.name,
     description: group.description ?? "",
@@ -94,18 +102,32 @@ export function presetTokenStats(
   policy: PresetToolPolicy,
   pricing?: TokenPricing,
 ): PresetTokenStats {
-  const active = resolveActiveGroups(policy, tools.map((tool) => tool.name));
-  const claimed = new Set<string>();
-  for (const group of active) {
-    for (const name of group.tools) claimed.add(name);
+  const names = tools.map((tool) => tool.name);
+  const active = resolveActiveGroups(policy, names);
+  const onDemandGroups = active.filter((group) => group.loading === "ondemand");
+  const presetDisabled = new Set(policy.disabled);
+  const alwaysOn: TokenSchema[] = [];
+  const onDemand: TokenSchema[] = [];
+  const disabled: TokenSchema[] = [];
+  for (const tool of tools) {
+    const owner = groupForTool(policy, names, tool.name);
+    if (
+      presetDisabled.has(tool.name)
+      || owner?.loading === "off"
+      || owner?.disabled.includes(tool.name)
+    ) {
+      disabled.push(tool);
+    } else if (owner?.loading === "always") {
+      alwaysOn.push(tool);
+    } else if (owner !== undefined) {
+      onDemand.push(tool);
+    } else {
+      alwaysOn.push(tool);
+    }
   }
-  const disabled = new Set(policy.disabled);
-  const alwaysOn = tools.filter((tool) => !disabled.has(tool.name) && !claimed.has(tool.name));
-  const onDemand = tools.filter((tool) => claimed.has(tool.name));
-  const disabledTools = tools.filter((tool) => disabled.has(tool.name));
   let onDemandTokens = 0;
   let onDemandSavings = 0;
-  for (const group of active) {
+  for (const group of onDemandGroups) {
     const estimate = estimateGroupTokens(group, tools);
     onDemandTokens += estimate.schema;
     onDemandSavings += estimate.net;
@@ -121,10 +143,10 @@ export function presetTokenStats(
     alwaysOnTokens: bucketTokens(alwaysOn),
     onDemandTools: onDemand.length,
     onDemandTokens,
-    onDemandGroups: active.length,
+    onDemandGroups: onDemandGroups.length,
     onDemandSavings,
-    disabledTools: disabledTools.length,
-    disabledTokens: bucketTokens(disabledTools),
+    disabledTools: disabled.length,
+    disabledTokens: bucketTokens(disabled),
   };
 }
 
@@ -133,19 +155,27 @@ export function toolCatalogStats(
   policy: PresetToolPolicy,
 ): ToolCatalogStats {
   const disabled = new Set(policy.disabled);
-  const grouped = new Set<string>();
-  for (const tool of tools) {
-    if (policy.groups.some((group) => group.patterns.some((pattern) => matchesPattern(tool.name, pattern)))) {
-      grouped.add(tool.name);
-    }
-  }
+  const groups = policy.groups.map((group) => ({
+    group,
+    loading: group.loading === "always" || group.loading === "off" ? group.loading : "ondemand",
+    disabled: new Set(group.disabled ?? []),
+  }));
 
   let ungroupedTools = 0;
   let onDemandTools = 0;
   let disabledTools = 0;
   for (const tool of tools) {
-    if (disabled.has(tool.name)) disabledTools += 1;
-    else if (grouped.has(tool.name)) onDemandTools += 1;
+    if (disabled.has(tool.name)) {
+      disabledTools += 1;
+      continue;
+    }
+    const owner = groups.find(({ group }) => group.patterns.some((pattern) => matchesPattern(tool.name, pattern)));
+    if (!owner) {
+      ungroupedTools += 1;
+      continue;
+    }
+    if (owner.loading === "off" || owner.disabled.has(tool.name)) disabledTools += 1;
+    else if (owner.loading === "ondemand") onDemandTools += 1;
     else ungroupedTools += 1;
   }
 

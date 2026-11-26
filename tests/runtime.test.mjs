@@ -1528,6 +1528,40 @@ describe("a compaction keep limit", () => {
     { name: "Search", patterns: ["web_*"] },
   ];
 
+  it("declares always-group members and never opens them", async () => {
+    const h = host([], {
+      disabled: [],
+      groups: [{ name: "GitHub", patterns: ["github_*"], loading: "always" }],
+    });
+    const runtime = new ToolPolicyRuntime(h.context, presets, h.settings);
+    runtime.start();
+
+    assert.deepEqual(h.restricted, []);
+    assert.equal(h.guard({ name: "github_issue" }), undefined);
+    const set = await h.hostTools.resolve({ agent: h.agent });
+    assert.deepEqual([...set.view().keys()], ["read", "github_issue", "web_search"]);
+    await runtime.dispose();
+  });
+
+  it("hides off-group members and enforces group-level disables", async () => {
+    const h = host([], {
+      disabled: [],
+      groups: [
+        { name: "Search", patterns: ["web_*"], loading: "off" },
+        { name: "GitHub", patterns: ["github_*"], loading: "always", disabled: ["github_issue"] },
+      ],
+    });
+    const runtime = new ToolPolicyRuntime(h.context, presets, h.settings);
+    runtime.start();
+
+    assert.deepEqual(h.restricted, ["github_issue", "web_search"]);
+    assert.match(h.guard({ name: "web_search" }), /group "Search" which is off/);
+    assert.match(h.guard({ name: "github_issue" }), /disabled inside group "GitHub"/);
+    const set = await h.hostTools.resolve({ agent: h.agent });
+    assert.deepEqual([...set.view().keys()], ["read"]);
+    await runtime.dispose();
+  });
+
   it("restores only the recently used group after a recorded compaction", async () => {
     const h = host(
       [...open("a", "GitHub"), ...open("b", "Search"), ...memberUse("use", "web_search"), compaction()],

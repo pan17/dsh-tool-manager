@@ -39,10 +39,15 @@ export interface EnterDecision {
 }
 
 export function catalogEntriesFromGroups(
-  groups: ReadonlyArray<{ name: string; description?: string; tools: readonly string[] }>,
+  groups: ReadonlyArray<{
+    name: string;
+    description?: string;
+    tools: readonly string[];
+    loading?: "always" | "ondemand" | "off";
+  }>,
 ): CatalogEntry[] {
   return groups
-    .filter((group) => group.tools.length > 0)
+    .filter((group) => (group.loading ?? "ondemand") === "ondemand" && group.tools.length > 0)
     .map((group) => ({
       name: group.name,
       description: group.description ?? "",

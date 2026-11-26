@@ -3,16 +3,20 @@ import assert from "node:assert/strict";
 import {
   denyNames,
   findGroup,
+  groupForTool,
   groupPolicyIssues,
   hiddenTools,
   listGroupViews,
   matchesPattern,
+  mcpGroupedNames,
+  mcpGroups,
   normalizeGroupName,
   normalizeSettings,
   parseKnownRestrictable,
   policyOrphans,
   resolveActiveGroups,
   resolveGroups,
+  resolveOnDemandGroups,
 } from "../dist/policy.js";
 
 describe("tool-manager policy", () => {
@@ -39,6 +43,121 @@ describe("tool-manager policy", () => {
           ],
         },
       },
+    });
+  });
+
+  it("normalizes group loading and disabled members without writing defaults", () => {
+    assert.deepEqual(normalizeSettings({
+      presets: {
+        standard: {
+          disabled: [],
+          groups: [
+            { name: "Always", patterns: ["a", "b"], loading: "always", disabled: ["a", "missing"] },
+            { name: "Off", patterns: ["c*"], loading: "off", disabled: ["c_one"] },
+            { name: "Default", patterns: ["d"], loading: "ondemand", disabled: [] },
+          ],
+        },
+      },
+    }), {
+      presets: {
+        standard: {
+          disabled: [],
+          groups: [
+            { name: "Always", patterns: ["a", "b"], loading: "always", disabled: ["a"] },
+            { name: "Off", patterns: ["c*"], loading: "off", disabled: ["c_one"] },
+            { name: "Default", patterns: ["d"] },
+          ],
+        },
+      },
+    });
+  });
+
+  it("resolves always, on-demand, off, and group-disabled members", () => {
+    const policy = {
+      disabled: [],
+      groups: [
+        { name: "Always", patterns: ["a*"], loading: "always", disabled: ["a2"] },
+        { name: "OnDemand", patterns: ["b*"] },
+        { name: "Off", patterns: ["c*"], loading: "off", disabled: ["c1"] },
+      ],
+    };
+    const names = ["a1", "a2", "b1", "b2", "c1", "c2", "read"];
+    assert.deepEqual(resolveGroups(policy, names).map((group) => ({
+      name: group.name,
+      loading: group.loading,
+      disabled: group.disabled,
+      tools: group.tools,
+    })), [
+      { name: "Always", loading: "always", disabled: ["a2"], tools: ["a1", "a2"] },
+      { name: "OnDemand", loading: "ondemand", disabled: [], tools: ["b1", "b2"] },
+      { name: "Off", loading: "off", disabled: ["c1"], tools: ["c1", "c2"] },
+    ]);
+    assert.deepEqual(resolveActiveGroups(policy, names).map((group) => group.name), ["Always", "OnDemand", "Off"]);
+    assert.deepEqual(resolveOnDemandGroups(policy, names).map((group) => group.name), ["OnDemand"]);
+    assert.equal(groupForTool(policy, names, "c2")?.name, "Off");
+    assert.equal(groupForTool(policy, names, "read"), undefined);
+  });
+
+  it("does not let a later group claim a group-disabled member", () => {
+    const policy = {
+      disabled: [],
+      groups: [
+        { name: "First", patterns: ["a*"], disabled: ["a1"] },
+        { name: "Second", patterns: ["a1"] },
+      ],
+    };
+    assert.deepEqual(resolveActiveGroups(policy, ["a1", "a2"]).map((group) => ({
+      name: group.name,
+      tools: group.tools,
+    })), [{ name: "First", tools: ["a2"] }]);
+  });
+
+  it("denies always members only when disabled, and off groups entirely", () => {
+    const policy = {
+      disabled: [],
+      groups: [
+        { name: "Always", patterns: ["a*"], loading: "always", disabled: ["a2"] },
+        { name: "OnDemand", patterns: ["b*"] },
+        { name: "Off", patterns: ["c*"], loading: "off" },
+      ],
+    };
+    const names = ["a1", "a2", "b1", "c1", "read"];
+    assert.deepEqual(denyNames(policy, names, new Set()), ["a2", "b1", "c1"]);
+    assert.deepEqual(denyNames(policy, names, new Set(["OnDemand"])), ["a2", "c1"]);
+  });
+
+  it("keeps mcp declarations for always groups and hides off/disabled members", () => {
+    const policy = {
+      mode: "mcp",
+      disabled: [],
+      groups: [
+        { name: "Always", patterns: ["a*"], loading: "always", disabled: ["a2"] },
+        { name: "OnDemand", patterns: ["b*"] },
+        { name: "Off", patterns: ["c*"], loading: "off", disabled: ["c1"] },
+      ],
+    };
+    const names = ["a1", "a2", "b1", "c1", "c2", "read"];
+    assert.deepEqual(denyNames(policy, names, new Set()), ["a2", "c1", "c2"]);
+    assert.deepEqual(mcpGroupedNames(policy, names), ["b1"]);
+    assert.deepEqual(mcpGroups(policy, names).map((group) => group.name), ["OnDemand"]);
+  });
+
+  it("allows group-level disables but rejects preset-level overlap", () => {
+    assert.deepEqual(groupPolicyIssues({
+      disabled: [],
+      groups: [{ name: "G", patterns: ["a", "b"], disabled: ["b"] }],
+    }, ["a", "b", "c"]), {
+      emptyGroups: [],
+      disabledMembers: [],
+      duplicateMembers: [],
+    });
+    assert.deepEqual(groupPolicyIssues({
+      disabled: ["b"],
+      groups: [{ name: "G", patterns: ["a", "b"] }],
+    }, ["a", "b", "c"]), {
+      emptyGroups: [],
+      disabledMembers: [{ tool: "b", groups: ["G"] }],
+      duplicateMembers: [],
     });
   });
 

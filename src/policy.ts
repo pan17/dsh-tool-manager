@@ -3,6 +3,7 @@ import {
   MCP_FIND_TOOL_NAME,
   PTC_TRANSPORT_NAME,
   type GenerationSettings,
+  type GroupLoading,
   type PresetOrphans,
   type PresetToolPolicy,
   type ResolvedGroupView,
@@ -91,10 +92,16 @@ export function normalizePresetPolicy(value: unknown): PresetToolPolicy {
     if (!name || seen.has(key)) continue;
     seen.add(key);
     const description = groupDescriptionOf(group);
+    const patterns = uniqueStrings(group?.patterns);
+    const loading = groupLoadingOf(group?.loading);
+    const groupDisabled = uniqueStrings(group?.disabled)
+      .filter((tool) => matchesAnyPattern(tool, patterns));
     groups.push({
       name,
       ...(description ? { description } : {}),
-      patterns: uniqueStrings(group?.patterns),
+      patterns,
+      ...(loading === undefined ? {} : { loading }),
+      ...(groupDisabled.length === 0 ? {} : { disabled: groupDisabled }),
     });
   }
 
@@ -118,6 +125,14 @@ function keepCountOf(value: unknown): number | undefined {
   return value;
 }
 
+/**
+ * Read one group's loading mode. Missing and `ondemand` both mean the default,
+ * so the field is omitted when the value is not worth persisting.
+ */
+function groupLoadingOf(value: unknown): GroupLoading | undefined {
+  return value === "always" || value === "off" ? value : undefined;
+}
+
 /** Whether this preset loads tools MCP-style instead of by on-demand groups. */
 export function isMcpMode(policy: PresetToolPolicy): boolean {
   return policy.mode === "mcp";
@@ -139,6 +154,8 @@ export function resolveGroups(
     name: group.name,
     ...(group.description ? { description: group.description } : {}),
     patterns: [...group.patterns],
+    loading: group.loading ?? "ondemand",
+    disabled: Array.isArray(group.disabled) ? [...group.disabled] : [],
     tools: toolNames.filter((name) => isGroupableTool(name) && matchesAnyPattern(name, group.patterns)),
   }));
 }
@@ -154,6 +171,12 @@ export interface GroupPolicyIssues {
   duplicateMembers: GroupConflict[];
 }
 
+/**
+ * Groups whose members survive the preset-level and group-level disables,
+ * in policy order. A tool belongs to the first group that matches it; this is
+ * how overlapping wildcards stay deterministic, and how a group in `always`
+ * mode still owns its tools for the purpose of duplicate detection.
+ */
 export function resolveActiveGroups(
   policy: PresetToolPolicy,
   toolNames: readonly string[],
@@ -162,12 +185,25 @@ export function resolveActiveGroups(
   const claimed = new Set<string>();
   const active: ResolvedGroupView[] = [];
   for (const group of resolveGroups(policy, toolNames)) {
-    const tools = group.tools.filter((name) => !disabled.has(name) && !claimed.has(name));
+    const groupDisabled = new Set(group.disabled);
+    const tools = group.tools.filter((name) => (
+      !disabled.has(name) && !groupDisabled.has(name) && !claimed.has(name)
+    ));
+    // Claim every matched name, even one disabled by this group: first-match
+    // ownership must not let a later group resurrect a group-disabled tool.
+    for (const name of group.tools) claimed.add(name);
     if (tools.length === 0) continue;
-    for (const name of tools) claimed.add(name);
     active.push({ ...group, tools });
   }
   return active;
+}
+
+/** Groups that still need `tool_list` / `tool_find`; `always` and `off` do not. */
+export function resolveOnDemandGroups(
+  policy: PresetToolPolicy,
+  toolNames: readonly string[],
+): ResolvedGroupView[] {
+  return resolveActiveGroups(policy, toolNames).filter((group) => group.loading === "ondemand");
 }
 
 export function groupPolicyIssues(
@@ -179,9 +215,12 @@ export function groupPolicyIssues(
   const emptyGroups: string[] = [];
   const disabledMembers: GroupConflict[] = [];
   for (const group of resolveGroups(policy, toolNames)) {
-    const enabled = group.tools.filter((name) => !disabled.has(name));
+    const groupDisabled = new Set(group.disabled);
+    const enabled = group.tools.filter((name) => !disabled.has(name) && !groupDisabled.has(name));
     if (enabled.length === 0) emptyGroups.push(group.name);
     for (const name of group.tools) {
+      // A preset-level disabled name inside a group's patterns is invalid:
+      // membership has one owner for its disabled state, not two.
       if (disabled.has(name)) disabledMembers.push({ tool: name, groups: [group.name] });
       const groups = owners.get(name) ?? [];
       groups.push(group.name);
@@ -199,13 +238,31 @@ export function hiddenTools(
   toolNames: readonly string[],
 ): Set<string> {
   const hidden = new Set<string>();
+  const owners = groupOwners(policy, toolNames);
   for (const name of toolNames) {
-    if (policy.disabled.includes(name)) hidden.add(name);
-    if (policy.groups.some((group) => matchesAnyPattern(name, group.patterns))) {
+    if (policy.disabled.includes(name)) {
       hidden.add(name);
+      continue;
     }
+    const owner = owners.get(name);
+    if (owner === undefined) continue;
+    if (owner.loading !== "always" || owner.disabled.includes(name)) hidden.add(name);
   }
   return hidden;
+}
+
+/** First-match group ownership across every group, including `always` and `off`. */
+function groupOwners(
+  policy: PresetToolPolicy,
+  toolNames: readonly string[],
+): Map<string, ResolvedGroupView> {
+  const owners = new Map<string, ResolvedGroupView>();
+  for (const group of resolveGroups(policy, toolNames)) {
+    for (const name of group.tools) {
+      if (!owners.has(name)) owners.set(name, group);
+    }
+  }
+  return owners;
 }
 
 /**
@@ -213,7 +270,7 @@ export function hiddenTools(
  * inherited baseline: grouped tools that are not currently exposed, plus
  * every explicit disable. The PTC transport is never denied. `tool_list` is
  * registered globally so PTC's SDK can bind it. Presets with no active
- * (non-empty) on-demand groups hide it here so restrict() can deny the inherited name.
+ * on-demand groups hide it here so restrict() can deny the inherited name.
  */
 export function denyNames(
   policy: PresetToolPolicy,
@@ -221,16 +278,27 @@ export function denyNames(
   exposures: ReadonlySet<string>,
 ): string[] {
   if (isMcpMode(policy)) return mcpDenyNames(policy, toolNames);
-  const groups = resolveActiveGroups(policy, toolNames);
-  const hidden = new Set<string>();
+  const groups = resolveOnDemandGroups(policy, toolNames);
+  const owners = groupOwners(policy, toolNames);
   const open = new Set([...exposures].map((name) => name.toLowerCase()));
+  const hidden = new Set<string>();
 
-  for (const group of groups) {
-    if (open.has(group.name.toLowerCase())) continue;
-    for (const name of group.tools) hidden.add(name);
-  }
-  for (const name of policy.disabled) {
-    if (toolNames.includes(name)) hidden.add(name);
+  for (const name of toolNames) {
+    if (policy.disabled.includes(name)) {
+      hidden.add(name);
+      continue;
+    }
+    const owner = owners.get(name);
+    if (owner === undefined) continue;
+    const groupDisabled = owner.disabled.includes(name);
+    if (owner.loading === "always") {
+      if (groupDisabled) hidden.add(name);
+      continue;
+    }
+    // `off` groups never load; `ondemand` groups load only after opening.
+    if (owner.loading === "off" || !open.has(owner.name.toLowerCase()) || groupDisabled) {
+      hidden.add(name);
+    }
   }
 
   hidden.delete(PTC_TRANSPORT_NAME);
@@ -247,12 +315,20 @@ function mcpDenyNames(
   toolNames: readonly string[],
 ): string[] {
   const disabled = new Set(policy.disabled);
+  const owners = groupOwners(policy, toolNames);
   const hidden: string[] = [];
   for (const name of toolNames) {
     if (name === PTC_TRANSPORT_NAME) continue;
-    // In mcp mode every registered tool stays in the tool set and callable;
-    // only explicit disables and the inert group opener are removed outright.
-    if (disabled.has(name) || name === DISCOVERY_TOOL_NAME) hidden.push(name);
+    // In mcp mode every registered tool stays callable; the declaration set
+    // hides explicit disables, closed groups, and disabled group members.
+    if (disabled.has(name) || name === DISCOVERY_TOOL_NAME) {
+      hidden.push(name);
+      continue;
+    }
+    const owner = owners.get(name);
+    if (owner !== undefined && (owner.loading === "off" || owner.disabled.includes(name))) {
+      hidden.push(name);
+    }
   }
   return hidden;
 }
@@ -263,19 +339,17 @@ function mcpDenyNames(
  * A grouped tool is not declared at all: the model sees the group in the
  * catalog and reads every member's schema with `tool_find({ group })`. The
  * registration itself is untouched, so the tool stays directly callable.
+ * Only `ondemand` groups participate; `always` groups are declared normally,
+ * and `off` groups are removed from the callable set by {@link mcpDenyNames}.
  */
 export function mcpGroupedNames(
   policy: PresetToolPolicy,
   toolNames: readonly string[],
 ): string[] {
   if (!isMcpMode(policy)) return [];
-  const disabled = new Set(policy.disabled);
   const grouped: string[] = [];
-  for (const group of resolveActiveGroups(policy, toolNames)) {
-    for (const name of group.tools) {
-      if (disabled.has(name)) continue;
-      grouped.push(name);
-    }
+  for (const group of resolveOnDemandGroups(policy, toolNames)) {
+    for (const name of group.tools) grouped.push(name);
   }
   return grouped;
 }
@@ -286,7 +360,16 @@ export function mcpGroups(
   toolNames: readonly string[],
 ): ResolvedGroupView[] {
   if (!isMcpMode(policy)) return [];
-  return resolveActiveGroups(policy, toolNames);
+  return resolveOnDemandGroups(policy, toolNames);
+}
+
+/** First group whose patterns claim one tool. */
+export function groupForTool(
+  policy: PresetToolPolicy,
+  toolNames: readonly string[],
+  toolName: string,
+): ResolvedGroupView | undefined {
+  return resolveGroups(policy, toolNames).find((group) => group.tools.includes(toolName));
 }
 
 export function emptyGroupNames(

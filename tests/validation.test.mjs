@@ -49,6 +49,64 @@ describe("tool-manager save validation", () => {
     );
   });
 
+  it("accepts group-level disables and always/off loading modes", async () => {
+    const schemas = { standard: ["read", "write", "old"] };
+    await assertNoEmptyGroups(
+      presetService([{ id: "standard", trust: "system", isDefault: true }], schemas),
+      toolService(schemas),
+      {
+        presets: {
+          standard: {
+            disabled: [],
+            groups: [
+              { name: "Always", patterns: ["read", "write"], loading: "always", disabled: ["write"] },
+              { name: "Off", patterns: ["old"], loading: "off" },
+            ],
+          },
+        },
+      },
+    );
+  });
+
+  it("rejects a group whose only members are group-disabled", async () => {
+    const schemas = { standard: ["read", "write"] };
+    await assert.rejects(
+      () => assertNoEmptyGroups(
+        presetService([{ id: "standard", trust: "system", isDefault: true }], schemas),
+        toolService(schemas),
+        {
+          presets: {
+            standard: {
+              disabled: [],
+              groups: [{ name: "Empty", patterns: ["read", "write"], disabled: ["read", "write"] }],
+            },
+          },
+        },
+      ),
+      /empty tool groups: "Empty"/,
+    );
+  });
+
+  it("rejects an explicit empty always group on an mcp preset", async () => {
+    const schemas = { standard: ["read"] };
+    await assert.rejects(
+      () => assertNoEmptyGroups(
+        presetService([{ id: "standard", trust: "system", isDefault: true }], schemas),
+        toolService(schemas),
+        {
+          presets: {
+            standard: {
+              mode: "mcp",
+              disabled: [],
+              groups: [{ name: "Always", patterns: ["missing"], loading: "always" }],
+            },
+          },
+        },
+      ),
+      /empty tool groups: "Always"/,
+    );
+  });
+
   it("rejects groups containing disabled tools", async () => {
     const schemas = { standard: ["read"] };
     const presets = presetService([{ id: "standard", trust: "system", isDefault: true }], schemas);
@@ -62,7 +120,7 @@ describe("tool-manager save validation", () => {
           },
         },
       }),
-      /disabled tool "read" in group "Disabled"/,
+      /disabled tool "read" inside the patterns of group "Disabled"/,
     );
   });
 
@@ -195,7 +253,7 @@ describe("tool-manager save validation", () => {
           },
         },
       }, undefined, merged),
-      /disabled tool "schedule_create" in group "A"/,
+      /disabled tool "schedule_create" inside the patterns of group "A"/,
     );
   });
 

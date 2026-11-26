@@ -3,10 +3,13 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [1.6.0] - 2026-11-26
 
 ### Added
 
+- 分组支持常驻、按需、关闭三种加载方式，并可在组内单独禁用工具（issue #12）：每个组新增 `loading: "always" | "ondemand" | "off"`（省略时为 `ondemand`）和 `disabled: string[]`（省略时为空）。`always` 组的成员按未分组工具规则直接声明（组内 `disabled` 除外）；`ondemand` 保持原来的 `tool_list` 打开方式；`off` 整组不声明，但成员与 `disabled` 原样保留，切回常驻/按需后恢复。MCP 按需模式下 `always` 直接声明、`ondemand` 只出现在 `tool_find` 目录、`off` 从可调用集合移除。设置页组行的「按需」徽标改为「常驻 / 按需 / 关闭」三态下拉；展开组后成员行带勾选框和状态徽标，取消勾选即在本组内禁用；`off` 组的 token 徽标改为「已关闭 N 个工具」。编辑对话框新增加载方式下拉，并为已勾选成员提供「禁用 / 取消禁用」开关；顶部说明会随加载方式变化，不再对常驻组写「确定后会显示在按需里」。
+  - 归属规则：未分组工具只看 Preset 级 `disabled`，分组工具只看本组 `disabled`。Preset 级 `disabled` 不得与任何组的 `patterns` 重叠；组内 `disabled` 只保留匹配本组 `patterns` 的名称，越界名称在归一化时丢弃。每组必须至少有一个未被 Preset/组禁用的成员。
+  - 兼容性：旧配置缺失 `loading` / `disabled` 时按 `ondemand` / 空数组读取，默认值不会写回文件；`off` 组的 `disabled` 不会被清掉。`mode`（默认 / MCP 按需）仍决定 `ondemand` 组的发现方式。
 - 默认加载模式新增「压缩后保留最近使用的按需组」策略：设置页「加载模式」下方可以填数量（每个 Preset 单独配置，随页面「保存」写入 `keepAfterCompaction`）。留空（默认）表示会话压缩不改变已打开的组，与旧行为完全一致；填 `0` 表示每次压缩成功后全部关闭；填 `N` 表示只保留最近使用的 N 个，其余重新收起，模型仍可再用 `tool_list` 打开。「最近使用」只看上一次压缩之后到这一次压缩之间的区间：组内工具有过成功调用（原生 `tool/call`+`tool/result`、PTC `tool/ptc-dispatch`），或组在此期间被打开/重新打开；只是闲置跨过压缩的组会被关闭。只有成功结束的 `compaction/end`（无 `error`）才会裁剪，压缩之后才打开的组不受该次影响。打开集合与裁剪都从会话日志重放，因此重启 DSH 恢复同一会话、fork 子会话与在线裁剪得到同样结果；裁剪后下一条目录消息会说明早先打开的组已被重置。收窄在 `compaction/end` 事件到达时立即完成，而不是等到下一次 `agent/pre-step`——DSH 的顺序是 `tools.resolve()` 先于 `agent/pre-step`，否则压缩后的第一个请求仍会带上压缩前的全部组。MCP 按需模式没有打开状态，该设置不生效；「复制配置」会把该值复制到目标 Preset，「重置配置」不会清掉它。
 
 ## [1.5.2] - 2026-11-26

@@ -894,10 +894,16 @@ export async function assertNoEmptyGroups(
 ): Promise<void> {
   const inventory = await presets.compositionInventory();
   const inspectable = new Map(inventory.map((item) => [item.id, item]));
-  for (const [presetId, policy] of Object.entries(settings.presets)) {
-    // Groups stay in the config for mcp-mode presets but never drive loading,
-    // so an empty (or stale) group must not block saving that mode.
-    if (policy.mode === "mcp") continue;
+  for (const [presetId, entryPolicy] of Object.entries(settings.presets)) {
+    // MCP-mode presets keep groups for their tool_find catalog; a stale
+    // default/ondemand group should not block saving that mode, while explicit
+    // always/off groups still carry loading semantics and must be valid.
+    let policy = entryPolicy;
+    if (policy.mode === "mcp") {
+      const groups = policy.groups.filter((group) => group.loading === "always" || group.loading === "off");
+      if (groups.length === 0) continue;
+      policy = { ...policy, groups };
+    }
     if (policy.groups.length === 0) continue;
     const composition = inspectable.get(presetId);
     if (!composition || composition.broken) continue;
@@ -911,11 +917,11 @@ export async function assertNoEmptyGroups(
       continue;
     }
     if (names === undefined) continue;
-    const issues = groupPolicyIssues(policyFor(settings, presetId), names);
+    const issues = groupPolicyIssues(policy, names);
     if (issues.disabledMembers.length > 0) {
       const issue = issues.disabledMembers[0]!;
       throw new Error(
-        `Preset ${JSON.stringify(presetId)} has disabled tool ${JSON.stringify(issue.tool)} in group ${JSON.stringify(issue.groups[0])}. Disabled tools cannot belong to on-demand groups.`,
+        `Preset ${JSON.stringify(presetId)} has disabled tool ${JSON.stringify(issue.tool)} inside the patterns of group ${JSON.stringify(issue.groups[0])}. Preset-level disabled tools cannot overlap group patterns; remove the tool from the group or enable it globally.`,
       );
     }
     if (issues.duplicateMembers.length > 0) {

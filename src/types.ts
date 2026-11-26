@@ -7,6 +7,8 @@ export const TOOL_MANAGER_PROBE_SESSION_ID = "tool-manager-probe-internal-v1";
 
 export type PresetPolicyMap = Record<string, PresetToolPolicy>;
 
+export type GroupLoading = "always" | "ondemand" | "off";
+
 export interface ToolGroupPolicy {
   /** Display name the model uses to open this group. */
   name: string;
@@ -14,6 +16,10 @@ export interface ToolGroupPolicy {
   description?: string;
   /** Exact tool names and optional `*` wildcard patterns from older configs. */
   patterns: string[];
+  /** How the group's active members load; absent means the historical `ondemand`. */
+  loading?: GroupLoading;
+  /** Members that stay unavailable even when the group is open. */
+  disabled?: string[];
 }
 
 export interface PresetToolPolicy {
@@ -149,6 +155,10 @@ export interface ResolvedGroupView {
   description?: string;
   patterns: string[];
   tools: string[];
+  /** Effective loading mode with the default filled in. */
+  loading: GroupLoading;
+  /** Effective group-level disabled members present in this Preset. */
+  disabled: string[];
   /** Present only for groups with active members. */
   tokens?: ToolTokenEstimate;
 }

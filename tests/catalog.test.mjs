@@ -31,6 +31,8 @@ describe("tool-manager catalog", () => {
     assert.deepEqual(catalogEntriesFromGroups([
       ...groups,
       { name: "空组", description: "ignored", tools: [] },
+      { name: "常驻组", tools: ["always_tool"], loading: "always" },
+      { name: "关闭组", tools: ["off_tool"], loading: "off" },
     ]).map((entry) => entry.name), ["GitHub MCP", "搜索工具"]);
   });
 

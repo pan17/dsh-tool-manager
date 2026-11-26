@@ -96,6 +96,22 @@ describe("copyPresetPolicy", () => {
     ]);
   });
 
+  it("copies group loading and group-level disables", () => {
+    const source = preset("standard", ["alpha", "beta", "gamma"], {
+      disabled: [],
+      groups: [
+        { name: "常驻", patterns: ["alpha", "beta"], loading: "always", disabled: ["beta"] },
+        { name: "关闭", patterns: ["gamma"], loading: "off", disabled: [] },
+      ],
+    });
+    const target = preset("minimal", ["alpha", "beta", "gamma"], { disabled: [], groups: [] });
+
+    assert.deepEqual(plain(client.copyPresetPolicy(source, target).groups), [
+      { name: "常驻", patterns: ["alpha", "beta"], loading: "always", disabled: ["beta"] },
+      { name: "关闭", patterns: ["gamma"], loading: "off" },
+    ]);
+  });
+
   it("keeps the target preset in MCP mode", () => {
     const source = preset("standard", ["alpha", "beta"], {
       disabled: [],
@@ -157,6 +173,27 @@ describe("copyPresetPolicy", () => {
       undefined,
       () => target.tools.map((tool) => tool.name),
     );
+  });
+});
+
+describe("group loading settings payload", () => {
+  it("writes non-default loading and non-empty disabled arrays only", () => {
+    const payload = plain(client.settingsPayload({
+      presets: [{
+        id: "standard",
+        policy: {
+          disabled: [],
+          groups: [
+            { name: "常驻", patterns: ["alpha", "beta"], loading: "always", disabled: ["beta"] },
+            { name: "按需", patterns: ["gamma"], loading: "ondemand", disabled: [] },
+          ],
+        },
+      }],
+    }));
+    assert.deepEqual(payload.presets.standard.groups, [
+      { name: "常驻", patterns: ["alpha", "beta"], loading: "always", disabled: ["beta"] },
+      { name: "按需", patterns: ["gamma"] },
+    ]);
   });
 });
 

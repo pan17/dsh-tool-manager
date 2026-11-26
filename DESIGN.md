@@ -164,6 +164,8 @@ interface ToolManagerSettings {
       name: string
       description?: string
       patterns: string[] // exact names from the settings UI; older `*` wildcards still match
+      loading?: "always" | "ondemand" | "off" // omitted means "ondemand"
+      disabled?: string[] // members disabled only inside this group
     }>
   }>
 }
@@ -174,33 +176,35 @@ interface ToolManagerSettings {
 从高到低：
 
 1. DSH 其他安全 restriction / guard；
-2. 本插件 `disabled`；
-3. 按需组默认隐藏；
-4. `tool_list(group)` 打开该组（当前会话一直可用）；
-5. 原始 Preset 工具目录。
+2. 本插件 `disabled`（Preset 级）与组级 `disabled`；
+3. `off` 组整组隐藏；
+4. `ondemand` 组默认隐藏；
+5. `tool_list(group)` 打开该按需组（当前会话一直可用）；
+6. 原始 Preset 工具目录。
 
-显式 disabled 永远不能被临时曝光反向开启。PTC 的 `run_code` 永远不会进入 deny 集合。`tool_list` 注册在 host 全局层；没有按需组的 Preset 会把它 deny 掉。
+显式 disabled 永远不能被临时曝光反向开启；`always` 组的普通成员直接声明，只有它的 `disabled` 成员被拒绝。PTC 的 `run_code` 永远不会进入 deny 集合。`tool_list` 注册在 host 全局层；没有任何有效按需组的 Preset 会把它 deny 掉。
 
 ### 3.3 `tool_list` 语义
 
 - `tool_list({ group: "GitHub MCP" })`：按名称打开该组，该组全部工具立刻可用，直到当前 Agent 结束或该组被删掉；
 - 每个 Agent 独立应用打开状态，不跨会话共享；成功调用由 Session 事件日志持久记录，同一 Session 重启恢复时重建状态；
 - 默认模式下可配置 `keepAfterCompaction`：每个成功结束的 `compaction/end`（无 `error`）把打开集合收窄到最近使用的 N 个，其余重新收起。最近使用按组内工具最后一次成功调用排序（原生 `tool/call`+`tool/result`，PTC `tool/ptc-dispatch`），从未调用过的组按最后一次成功 `tool_list` 的时间排序；**排序只在当前压缩区间内进行**：只有在上一次压缩之后被打开/重新打开或使用过的组才是候选，跨区间闲置的组会被关闭，`0` 即每次全部关闭。省略＝不裁剪。折叠在整段日志上一次完成（而非增量修补），因此重启恢复、fork 前缀与在线裁剪得到同一结果；裁剪后下一条目录消息会说明「压缩后早先打开的组已被重置」。收窄必须在 `session/event` 收到 `compaction/end` 时立即执行：DSH 的 `agent-loop` 在 `agent/pre-step` **之前**调用 `tools.resolve()`，若只挂在 pre-step，压缩后的第一个请求仍会按旧集合声明工具（首版实测即为此现象）；`tools.resolve()` 的包装器也再调用一次作为兜底，游标保证不重复计算。MCP 模式没有打开状态，不应用该策略；
-- `tool_list` 注册在 host 全局层，这样 PTC 生成 SDK 能绑定它；没有按需组的 Preset 用 restriction 隐藏；
+- `tool_list` 注册在 host 全局层，这样 PTC 生成 SDK 能绑定它；没有任何有效按需组的 Preset 用 restriction 隐藏；
 - PTC 模式应在 `run_code` 内调用 `await tools.tool_list({ group })`；
-- 按需组说明不走 `systemPrompt.section`。所有 Preset（含极简模式的 `complete: true` persona）都在 `agent/pre-step` 写入一条 skill 式的持久 user 角色 `<system-reminder>` 目录；目录为每组列出实际工具数量和完整工具名；
-- 只有至少匹配一个当前真实且未被显式关闭工具的组才是有效组。空组或仅含关闭工具的组不进入目录、不能通过 `tool_list` 打开，且当某 Preset 没有有效组时会隐藏 `tool_list`；
-- 工具状态互斥：一个工具只能是常开、已关闭，或属于一个按需组。WebUI 不提供已关闭或被其他组占用的工具；Host 保存接口拒绝关闭工具入组和跨组重复；
+- 按需组说明不走 `systemPrompt.section`。所有 Preset（含极简模式的 `complete: true` persona）都在 `agent/pre-step` 写入一条 skill 式的持久 user 角色 `<system-reminder>` 目录；目录为每个 `ondemand` 组列出实际工具数量和完整工具名；
+- 只有至少匹配一个当前真实且未被任何层级禁用的成员的 `ondemand` 组才是有效组。空组或仅含关闭工具的组不进入目录、不能通过 `tool_list` 打开，且当某 Preset 没有有效按需组时会隐藏 `tool_list`；
+- 工具状态互斥：一个工具只能是常驻（未分组、常驻组成员）、按需（按需组成员），或关闭（Preset 级关闭、关闭组成员、组内禁用）。组内 `disabled` 只影响本组，Preset 级 `disabled` 不得与任何组 `patterns` 重叠；WebUI 不提供已关闭或被其他组占用的工具；Host 保存接口拒绝关闭工具入组和跨组重复；
+- 每个组有 `loading: "always" | "ondemand" | "off"`（缺省 `ondemand`）。`always` 成员按未分组工具规则直接声明（组内 `disabled` 除外）；`ondemand` 走 `tool_list`；`off` 整组不声明但保留成员与 `disabled`，切回后恢复。MCP 模式下 `always` 声明、`ondemand` 只出现在 `tool_find` 目录、`off` 从可调用集合移除；
 - 旧 wildcard 配置在编辑时投影为当前实际成员的精确工具名。运行时对尚未修复的重叠配置按组顺序 first-match，确保目录中一个工具最多出现一次；
-- WebUI 和 Host 保存接口都禁止保存空组。旧配置中的空组或冲突组仍会在设置页中标为无效，供用户修复或删除；
+- WebUI 和 Host 保存接口都禁止保存空组（按未禁用成员计算）。旧配置中的空组或冲突组仍会在设置页中标为无效，供用户修复或删除；
 - 保存校验与设置页必须读**同一份**工具目录：standing composition 与 Agent 作用域注册（探针 + 运行中 Agent 观测）的并集。只读 standing 会把 `@deepseek-ai/dsh-schedule` 注入每个 root Agent 的 `schedule_*`、以及 `modelSelectionSettings` 注入的 `subagent` 判成不存在，从而拒绝一个页面能列出、运行时也能正常打开的组。只有真正读不到 standing composition 时才跳过该校验。
 
 ### 3.4 MCP 模式
 
 `mode: "mcp"` 不是“按组/按工具启用”，而是**把“声明”和“调用”拆开**：
 
-- **声明集合**（模型每步读到的工具表）：只有常开工具 + `tool_find`，组内工具一个都不出现。
-- **调用集合**（宿主按名派发能解析到的工具）：常开工具 + 组内工具（未 `disabled`、未被 `tool_list` 顶替）。
+- **声明集合**（模型每步读到的工具表）：常驻工具 + `always` 组成员 + `tool_find`；`ondemand` 组内工具与 `off` 组都不出现。
+- **调用集合**（宿主按名派发能解析到的工具）：常驻工具 + `always` 组成员 + `ondemand` 组内工具（未 `disabled`）；`off` 组与组内 `disabled` 被移除。
 
 组名与描述由一条 notice 注入，`tool_find({ group })` 只读地返回整组每个工具的完整 JSON Schema，读取本身不改变任何会话状态。
 
@@ -270,10 +274,10 @@ DSH 内置文件/Web 等工具 guidance 会通过 `ctx.tools.get(name, scope)` �
 - 同源 HTTP endpoint 提供 snapshot/save；
 - 保存携带文件存储 revision，拒绝 stale write，并以临时文件原子替换；
 - WebUI 不直接编辑 `agent.cordis.yml`，因此绝不会损坏 shipped preset；
-- 设置页支持搜索、常开/按需/关闭筛选、组内筛选勾选、以及 orphan disable 清理；
-- 设置页按 DSH 的 4 字符/token 口径显示工具与按需组的常驻 token 估算：工具行显示单工具 schema 价格（已关闭工具显示开启后的潜在值），组标题显示「组内 schema − 关闭态目录行」的收起净省，五个统计卡片各自附带 token 小字（总量合计、分组收起可省、未分组常驻、按需 schema 合计、已关闭关闭可省），悬停说明写出「按需工具 schema 毛额 − 关闭态目录行 = 分组净省」的完整算式；
-- 设置页支持把当前 Preset 的整份策略（全部按需组 + 关闭清单）复制到多个其他 Preset：目标配置整份覆盖，按目标实际工具裁剪组员、跳过空组，只修改页面草稿，保存时仍走同一份 `/save` 校验；加载模式（`mode`）属于目标 Preset 自身，复制既不继承源、也不重置目标，页面在复制对话框里写明并逐行标出目标保留的模式；不引入全局策略桶，也不改变 `tool-manager.json` 的 `presets` 结构；
-- 设置页支持一键重置当前 Preset 的整份策略：清空全部按需组和关闭清单，恢复为所有工具常开、未分组，加载模式保持不变；同样只修改页面草稿，保存后生效；
+- 设置页支持搜索、常驻/按需/关闭筛选、组内筛选勾选、以及 orphan disable 清理；
+- 设置页按 DSH 的 4 字符/token 口径显示工具与分组的常驻 token 估算：工具行显示单工具 schema 价格（已关闭工具显示开启后的潜在值），组标题显示「组内 schema − 关闭态目录行」的收起净省，`off` 组改为「已关闭 N 个工具」而不显示 token，五个统计卡片各自附带 token 小字（总量合计、分组收起可省、常驻每轮、按需 schema 合计、已关闭关闭可省），悬停说明写出「按需工具 schema 毛额 − 关闭态目录行 = 分组净省」的完整算式；
+- 设置页支持把当前 Preset 的整份策略（全部组，含每组 `loading` 与 `disabled` + 关闭清单）复制到多个其他 Preset：目标配置整份覆盖，按目标实际工具裁剪组员、跳过空组，只修改页面草稿，保存时仍走同一份 `/save` 校验；加载模式（`mode`）属于目标 Preset 自身，复制既不继承源、也不重置目标，页面在复制对话框里写明并逐行标出目标保留的模式；不引入全局策略桶，也不改变 `tool-manager.json` 的 `presets` 结构；
+- 设置页支持一键重置当前 Preset 的整份策略：清空全部组和关闭清单，恢复为所有工具常驻、未分组，加载模式保持不变；同样只修改页面草稿，保存后生效；
 - 生成模型的入口放在两个会发起模型请求的对话框里（「自动分组」确认框、「手动分组」对话框的「自动生成名称和描述」上方），两者改同一个设置：`tool-manager.json` 里的全局 `generation` 字段，不属于任何 Preset。选择器不提供“跟随默认”这一类占位项，而是永远显示一个具体模型：没配置时显示 `agentDefaultModel` 当前的模型，与旧版本行为一致。推理强度下拉显示的是**当前生效的档位**：跟随默认模型时，`agentDefaultModel.currentSelection()` 带着它自己的 `reasoningEffort`（本机是 Max），插件就照着它跑，所以下拉里选中的也是 Max——显示“默认”而实际发 Max 会立刻对不上。下拉里仍保留「默认」这一档，表示不额外指定、交还给模型自己；在默认模型上它等价于该模型当前的档位。`generation` 有两种形态：完整的 `{provider, model}` 固定一个路由，只带 `reasoningEffort` 则表示继续自动跟随默认模型、仅覆盖它的推理强度；选「默认」就把这个字段清掉。对话框里的模型名与档位名都取自目录（查不到才退回 id），并与选择器读同一个“生效值”，所以句子和下拉永远写同一个档位。换模型时档位不会丢：新路由也声明这一档就原地保留，否则先看它的 `defaultEffort`，再按“两个列表都按由低到高排列”做相对位置映射（Off → 最低档、Max → Max）——早先“新模型没声明就丢掉”的做法会让档位掉回默认模型的 Max，正好是最慢的一档。候选列表来自 Host 的 `llm.listProviders()` / `llm.listModels()` / `llm.resolveModelInfo()`，只列出当前可用的路由——某个 Provider 的目录读不出来时单独报错而不清空选项；生成时 Host 重新校验一次，模型或 Provider 已失效就回退到默认模型并在页面与结果里写明原因，推理强度不在该模型声明的档位时改用它的默认档或不发送该参数（LLM 服务会拒绝未声明的 effort）。选择随页面草稿即时写入配置文件：改完立刻走 `POST /tool-manager/api/generation`（不带页面 revision，只改 `generation`，由 config store 的写队列与下一次「保存」串行化），响应带回新的 revision，页面用它更新快照，之后的「保存」不会因这次写而判成 stale。老的页面不带 `generation` 键时仍视为“没改”，只有显式 `null` 才表示清空。
 
 生产版仍可：
@@ -313,7 +317,7 @@ DSH 内置文件/Web 等工具 guidance 会通过 `ctx.tools.get(name, scope)` �
 
 - WebUI 能列出所有 Preset 及各自实际工具 schema；
 - 关闭工具后，live Agent 下一 step 不再看到也不能调用它；
-- 按需组工具默认不进入模型 schema；
+- 按需组工具默认不进入模型 schema；常驻组成员直接进入；关闭组和组内禁用成员不进入；
 - `tool_list` 能列组并打开目标组；
 - 打开仅影响当前 Agent，该会话内一直可用；
 - MCP 工具可用 `mcp__server__*` 分组；

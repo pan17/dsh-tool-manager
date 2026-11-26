@@ -17,7 +17,7 @@ window.__ModuleLoader__.load({
 			".tm_model_block{display:flex;flex-direction:column;gap:6px;min-width:0}.tm_model_row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}.tm_model_row .tm_model_label{flex:0 0 auto;font-size:12px;color:var(--dsw-alias-label-secondary,#9097a4);cursor:help;white-space:nowrap}.tm_model_row .tm_select_wrap{min-width:0}.tm_model_row .tm_model_pick{flex:1 1 auto}.tm_model_row .tm_preset_select{min-width:0;width:100%}.tm_model_row .tm_effort_pick{flex:0 0 auto}.tm_model_row .tm_effort_pick .tm_preset_select{width:auto;min-width:96px}.tm_model_hints{display:flex;align-items:center;gap:8px;flex-wrap:wrap}",
 			".tm_panel{border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.24));border-radius:12px;background:var(--dsw-alias-bg-layer-1,rgba(128,128,128,.06));overflow:hidden}",
 			".tm_panel_head{padding:13px 14px;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.2));display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;position:relative}.tm_panel_head b{font-size:14px}",
-			".tm_tools{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:0}.tm_tool{display:flex;gap:10px;align-items:flex-start;padding:11px 14px;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.13))}.tm_tool_name{font:600 12px ui-monospace,SFMono-Regular,Consolas,monospace}.tm_tool_desc{font-size:11px;color:var(--dsw-alias-label-secondary,#9097a4);line-height:1.4;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}",
+			".tm_tools{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:0}.tm_tool{display:flex;gap:10px;align-items:flex-start;padding:11px 14px;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.13))}.tm_tool_name{font:600 12px ui-monospace,SFMono-Regular,Consolas,monospace}.tm_group_ref{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:6px;background:rgba(128,128,128,.12);color:var(--dsw-alias-label-secondary,#9097a4);font:400 10px/1.5 ui-sans-serif,system-ui,sans-serif;vertical-align:middle}.tm_group_name{display:inline-block;margin-left:4px;color:var(--dsw-alias-label-secondary,#9097a4);font:400 10px/1.5 ui-sans-serif,system-ui,sans-serif;vertical-align:middle}.tm_tool_desc{font-size:11px;color:var(--dsw-alias-label-secondary,#9097a4);line-height:1.4;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}",
 			".tm_row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.tm_input{box-sizing:border-box;min-width:130px;flex:1;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.3));border-radius:7px;background:var(--dsw-alias-bg-base,#17191d);color:inherit;padding:7px 9px;font:inherit;font-size:12px}.tm_code{font:11px ui-monospace,SFMono-Regular,Consolas,monospace;color:#9da8ff}.tm_notice{padding:12px;border-radius:9px;background:color-mix(in srgb,#f59e0b 12%,transparent);font-size:12px}.tm_error{padding:12px;border-radius:9px;background:color-mix(in srgb,#ef4444 12%,transparent);color:#fca5a5;font-size:12px}",
 			".tm_filters{display:flex;gap:6px;flex-wrap:wrap;align-items:center}.tm_chip{appearance:none;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));border-radius:999px;background:transparent;color:inherit;padding:4px 9px;cursor:pointer;font:inherit;font-size:11px}.tm_chip.active{border-color:#7c8cff;background:color-mix(in srgb,#7c8cff 16%,transparent)}",
 			".tm_stats{display:flex;flex-wrap:nowrap;gap:6px;padding:8px 12px;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.13))}.tm_stat{flex:1 1 0;min-width:0;padding:6px 7px;border-radius:7px;background:var(--dsw-alias-bg-layer-1,rgba(128,128,128,.07));border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.15))}.tm_stat_value{font-size:15px;font-weight:700;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tm_stat_label{margin-top:2px;font-size:10px;line-height:1.3;color:var(--dsw-alias-label-secondary,#9097a4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}@media(max-width:560px){.tm_stats{flex-wrap:wrap}.tm_stat{flex:1 1 30%}}",
@@ -25,13 +25,13 @@ window.__ModuleLoader__.load({
 			".tm_help{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;margin-left:6px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));border-radius:50%;background:var(--dsw-alias-bg-layer-1,rgba(128,128,128,.08));color:var(--dsw-alias-label-secondary,#9097a4);font:700 10px/1 ui-sans-serif,system-ui,sans-serif;cursor:help;vertical-align:middle;outline:none}.tm_help:hover,.tm_help:focus-visible{border-color:#7c8cff;color:#9da8ff}.tm_help::after{content:attr(data-tip);position:absolute;left:0;top:calc(100% + 6px);width:min(520px,calc(100vw - 48px));max-width:none;padding:10px 12px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));border-radius:9px;background:var(--dsw-alias-bg-base,#17191d);box-shadow:0 14px 40px rgba(0,0,0,.35);color:var(--dsw-alias-label-primary,#e7e9ed);font:400 12px/1.65 ui-sans-serif,system-ui,sans-serif;white-space:pre-line;text-align:left;opacity:0;visibility:hidden;pointer-events:none;z-index:30;transition:opacity .12s ease}.tm_help:hover::after,.tm_help:focus-visible::after{opacity:1;visibility:visible}",
 			".tm_badge{display:inline-block;margin-left:6px;padding:2px 7px;border:1px solid transparent;border-radius:999px;font-size:10px;font-weight:700;line-height:1.35;letter-spacing:.02em;vertical-align:middle;color:#fff}.tm_badge.off{background:#b42318;border-color:#d92d20;color:#fff}.tm_badge.cold{background:#4338ca;border-color:#6366f1;color:#fff}.tm_badge.live{background:#15803d;border-color:#22c55e;color:#fff}.tm_badge.ptc{background:#6d28d9;border-color:#a78bfa;color:#fff}.tm_badge.native{background:#334155;border-color:#64748b;color:#fff}",
 			".tm_group{border-bottom:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.13))}.tm_group:last-child{border-bottom:0}",
-			".tm_group_bar{display:flex;align-items:center;gap:8px;padding:11px 14px}",
+			".tm_group_bar{display:flex;align-items:center;gap:8px;padding:11px 14px}.tm_group_mode{border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));border-radius:999px;background:var(--dsw-alias-bg-layer-1,rgba(128,128,128,.08));color:inherit;padding:3px 8px;font:inherit;font-size:11px;cursor:pointer}.tm_group_mode.always{color:#22c55e;border-color:#22c55e;background:rgba(34,197,94,.12)}.tm_group_mode.ondemand{color:#818cf8;border-color:#6366f1;background:rgba(99,102,241,.12)}.tm_group_mode.off{color:#f87171;border-color:#ef4444;background:rgba(239,68,68,.12)}.tm_group_mode option{background:var(--dsw-alias-bg-base,#17191d);color:var(--dsw-alias-label-primary,#e7e9ed)}.tm_group_mode option[value=always]{color:#22c55e}.tm_group_mode option[value=ondemand]{color:#818cf8}.tm_group_mode option[value=off]{color:#f87171}",
 			".tm_chevron{appearance:none;border:0;background:transparent;color:inherit;width:28px;height:28px;border-radius:7px;cursor:pointer;font:16px/1 inherit;flex:0 0 auto}.tm_chevron:hover{background:var(--dsw-alias-bg-layer-1,rgba(128,128,128,.1))}",
 			".tm_group_main{appearance:none;border:0;background:transparent;color:inherit;text-align:left;flex:1;min-width:0;cursor:pointer;padding:0}",
 			".tm_group_title{font-size:13px;font-weight:600;line-height:1.3}.tm_group_sub{font-size:11px;color:var(--dsw-alias-label-secondary,#9097a4);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
 			".tm_group_count{flex:0 0 auto;font-size:12px;color:var(--dsw-alias-label-secondary,#9097a4)}",
 			".tm_group_body{padding:0 14px 12px 50px}",
-			".tm_member{padding:7px 0;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.08))}.tm_member:last-child{border-bottom:0}",
+			".tm_member{display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.08))}.tm_member:last-child{border-bottom:0}",
 			".tm_modal{position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;padding:24px}",
 			".tm_modal_mask{position:absolute;inset:0;background:rgba(0,0,0,.55)}",
 			".tm_modal_card{position:relative;z-index:1;width:min(720px,100%);max-height:min(84vh,760px);display:flex;flex-direction:column;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));border-radius:14px;background:var(--dsw-alias-bg-base,#17191d);box-shadow:0 24px 80px rgba(0,0,0,.45)}",
@@ -89,11 +89,17 @@ window.__ModuleLoader__.load({
 		function policyPayload(policy) {
 			const payload = {
 				disabled: [...(policy.disabled || [])],
-				groups: (policy.groups || []).map((group) => ({
-					name: group.name,
-					...(group.description ? { description: group.description } : {}),
-					patterns: [...(group.patterns || [])],
-				})),
+				groups: (policy.groups || []).map((group) => {
+					const loading = group.loading === "always" || group.loading === "off" ? group.loading : undefined;
+					const groupDisabled = Array.isArray(group.disabled) ? [...group.disabled] : [];
+					return {
+						name: group.name,
+						...(group.description ? { description: group.description } : {}),
+						patterns: [...(group.patterns || [])],
+						...(loading === undefined ? {} : { loading }),
+						...(groupDisabled.length === 0 ? {} : { disabled: groupDisabled }),
+					};
+				}),
 			};
 			if (policy.mode === "mcp") payload.mode = "mcp";
 			if (typeof policy.keepAfterCompaction === "number") {
@@ -102,7 +108,8 @@ window.__ModuleLoader__.load({
 			return payload;
 		}
 		/**
-		 * Copy one Preset's on-demand groups and disabled names onto another.
+		 * Copy one Preset's groups (including each group's loading mode and
+		 * group-level disables) and disabled names onto another.
 		 *
 		 * The target is meant to be overwritten, so its current groups and
 		 * disabled names are ignored. Copy only what the target can actually
@@ -129,20 +136,28 @@ window.__ModuleLoader__.load({
 			const groups = [];
 			const skippedGroups = [];
 			for (const group of sourcePolicy.groups || []) {
+				const sourceMembers = new Set(matchingTools(sourceTools, group.patterns || []).map((tool) => tool.name));
+				const groupDisabled = new Set(
+					(group.disabled || []).filter((name) => sourceMembers.has(name) && targetNames.has(name)),
+				);
 				const members = [];
 				for (const tool of matchingTools(sourceTools, group.patterns || [])) {
 					if (!targetNames.has(tool.name) || claimed.has(tool.name)) continue;
 					claimed.add(tool.name);
 					members.push(tool.name);
 				}
-				if (members.length === 0) {
+				if (!members.some((name) => !groupDisabled.has(name))) {
 					skippedGroups.push(group.name || "未命名分组");
 					continue;
 				}
+				const loading = group.loading === "always" || group.loading === "off" ? group.loading : undefined;
+				const disabledMembers = [...groupDisabled];
 				groups.push({
 					name: group.name,
 					...(group.description ? { description: group.description } : {}),
 					patterns: members,
+					...(loading === undefined ? {} : { loading }),
+					...(disabledMembers.length === 0 ? {} : { disabled: disabledMembers }),
 				});
 			}
 			const mode = targetPreset.policy && targetPreset.policy.mode === "mcp" ? "mcp" : undefined;
@@ -360,8 +375,11 @@ window.__ModuleLoader__.load({
 			const empty = [];
 			const disabledMembers = [];
 			for (const group of preset.policy.groups || []) {
+				const groupDisabled = new Set(group.disabled || []);
 				const members = matchingTools(preset.tools, group.patterns);
-				if (!members.some((tool) => !disabled.has(tool.name))) empty.push(group.name || "未命名分组");
+				if (!members.some((tool) => !disabled.has(tool.name) && !groupDisabled.has(tool.name))) {
+					empty.push(group.name || "未命名分组");
+				}
 				for (const tool of members) {
 					if (disabled.has(tool.name)) disabledMembers.push({ tool: tool.name, group: group.name || "未命名分组" });
 					const groups = owners.get(tool.name) || [];
@@ -374,16 +392,27 @@ window.__ModuleLoader__.load({
 		}
 		function catalogStats(preset) {
 			const disabled = new Set(preset.policy.disabled || []);
-			const grouped = groupedNames(preset);
+			const groups = preset.policy.groups || [];
 			let ungroupedTools = 0;
 			let onDemandTools = 0;
 			let disabledTools = 0;
 			for (const tool of preset.tools || []) {
-				if (disabled.has(tool.name)) disabledTools += 1;
-				else if (grouped.has(tool.name)) onDemandTools += 1;
+				if (disabled.has(tool.name)) {
+					disabledTools += 1;
+					continue;
+				}
+				const owner = groups.find((group) => matchingTools([tool], group.patterns).length > 0);
+				if (!owner) {
+					ungroupedTools += 1;
+					continue;
+				}
+				const groupDisabled = Array.isArray(owner.disabled) ? owner.disabled : [];
+				const loading = owner.loading === "always" || owner.loading === "off" ? owner.loading : "ondemand";
+				if (loading === "off" || groupDisabled.includes(tool.name)) disabledTools += 1;
+				else if (loading === "ondemand") onDemandTools += 1;
 				else ungroupedTools += 1;
 			}
-			return { totalTools: (preset.tools || []).length, groupCount: (preset.policy.groups || []).length, ungroupedTools, onDemandTools, disabledTools };
+			return { totalTools: (preset.tools || []).length, groupCount: groups.length, ungroupedTools, onDemandTools, disabledTools };
 		}
 		// Token estimates mirror the Host's `@deepseek-ai/dsh-token-meter/estimate`
 		// (4 characters per token) so the editor updates live while groups are
@@ -427,38 +456,82 @@ window.__ModuleLoader__.load({
 			return estimateToolTokens(tool);
 		}
 		function estimateGroupTokens(group, members) {
-			if (members.length === 0) return { schema: 0, catalog: 0, net: 0 };
+			if (members.length === 0 || groupLoading(group) === "off") return { schema: 0, catalog: 0, net: 0 };
 			let schema = 0;
 			for (const tool of members) {
 				const tokens = toolTokens(tool);
 				if (tokens === null) return null;
 				schema += tokens;
 			}
+			if (groupLoading(group) === "always") return { schema, catalog: 0, net: schema };
 			const catalog = Math.ceil(renderCatalogLine(group, members).length / 4);
 			return { schema, catalog, net: schema - catalog };
+		}
+		function groupLoading(group) {
+			return group.loading === "always" || group.loading === "off" ? group.loading : "ondemand";
+		}
+		function groupDisabled(group) {
+			return Array.isArray(group.disabled) ? group.disabled : [];
+		}
+		function groupOwners(preset) {
+			const owners = new Map();
+			for (const group of preset.policy.groups || []) {
+				for (const tool of matchingTools(preset.tools, group.patterns)) {
+					if (!owners.has(tool.name)) owners.set(tool.name, group);
+				}
+			}
+			return owners;
+		}
+		function groupOfTool(preset, toolName) {
+			const tool = (preset.tools || []).find((item) => item.name === toolName);
+			if (!tool) return undefined;
+			return (preset.policy.groups || []).find((group) => matchingTools([tool], group.patterns).length > 0);
+		}
+		function toolDisabled(preset, toolName) {
+			if ((preset.policy.disabled || []).includes(toolName)) return true;
+			const group = groupOfTool(preset, toolName);
+			return group !== undefined
+				&& (groupLoading(group) === "off" || groupDisabled(group).includes(toolName));
+		}
+		function activeGroupMembers(group, preset) {
+			const disabled = new Set(preset.policy.disabled || []);
+			const groupDisabledSet = new Set(groupDisabled(group));
+			return matchingTools(preset.tools, group.patterns)
+				.filter((tool) => !disabled.has(tool.name) && !groupDisabledSet.has(tool.name));
 		}
 		function activeGroupViews(preset) {
 			const disabled = new Set(preset.policy.disabled || []);
 			const claimed = new Set();
 			const active = [];
 			for (const group of preset.policy.groups || []) {
-				const members = matchingTools(preset.tools, group.patterns)
-					.filter((tool) => !disabled.has(tool.name) && !claimed.has(tool.name));
+				const allMembers = matchingTools(preset.tools, group.patterns);
+				const members = activeGroupMembers(group, preset).filter((tool) => !claimed.has(tool.name));
+				// Claim disabled members too: first-match ownership must not let a
+				// later group resurrect a group-disabled tool in the draft view.
+				for (const tool of allMembers) claimed.add(tool.name);
 				if (members.length === 0) continue;
-				for (const tool of members) claimed.add(tool.name);
 				active.push({ group, members });
 			}
 			return { active, claimed, disabled };
 		}
 		function presetTokenStats(preset) {
-			const { active, claimed, disabled } = activeGroupViews(preset);
+			const { active, disabled } = activeGroupViews(preset);
+			const onDemandActive = active.filter((item) => groupLoading(item.group) === "ondemand");
+			const owners = groupOwners(preset);
 			const allTools = preset.tools || [];
-			const alwaysOn = allTools.filter((tool) => !disabled.has(tool.name) && !claimed.has(tool.name));
-			const onDemand = allTools.filter((tool) => claimed.has(tool.name));
-			const disabledTools = allTools.filter((tool) => disabled.has(tool.name));
+			const alwaysOn = [];
+			const onDemand = [];
+			const disabledTools = [];
+			for (const tool of allTools) {
+				const owner = owners.get(tool.name);
+				const groupOff = owner !== undefined && (groupLoading(owner) === "off" || groupDisabled(owner).includes(tool.name));
+				if (disabled.has(tool.name) || groupOff) disabledTools.push(tool);
+				else if (owner !== undefined && groupLoading(owner) === "ondemand") onDemand.push(tool);
+				else alwaysOn.push(tool);
+			}
 			let onDemandTokens = 0;
 			let onDemandSavings = 0;
-			for (const item of active) {
+			for (const item of onDemandActive) {
 				const tokens = estimateGroupTokens(item.group, item.members);
 				if (tokens) {
 					onDemandTokens += tokens.schema;
@@ -479,7 +552,7 @@ window.__ModuleLoader__.load({
 				alwaysOnTokens: additive ? resident(alwaysOn) : estimateToolsTokens(alwaysOn),
 				onDemandTools: onDemand.length,
 				onDemandTokens,
-				onDemandGroups: active.length,
+				onDemandGroups: onDemandActive.length,
 				onDemandSavings,
 				disabledTools: disabledTools.length,
 				disabledTokens: additive ? resident(disabledTools) : estimateToolsTokens(disabledTools),
@@ -487,8 +560,14 @@ window.__ModuleLoader__.load({
 		}
 		function groupTokenEstimates(preset) {
 			const map = new Map();
-			for (const item of activeGroupViews(preset).active) {
-				map.set(item.group._key || item.group.name, estimateGroupTokens(item.group, item.members));
+			for (const group of preset.policy.groups || []) {
+				if (groupLoading(group) === "off") {
+					map.set(group._key || group.name, null);
+					continue;
+				}
+				const members = activeGroupMembers(group, preset);
+				const tokens = estimateGroupTokens(group, members);
+				map.set(group._key || group.name, tokens);
 			}
 			return map;
 		}
@@ -602,7 +681,7 @@ window.__ModuleLoader__.load({
 		}
 
 		const TOOL_CATALOG_HELP = [
-			"关掉后立刻对模型隐藏。按需组默认隐藏，模型要先调用 tool_list 打开所在组才能使用。",
+			"关掉后立刻对模型隐藏。分组可设为常驻、按需或关闭：常驻组直接声明，按需组默认隐藏、模型要先调用 tool_list 打开所在组才能使用，关闭组整组不声明；组内成员还可以单独禁用。",
 			"",
 			"tool_list 只在当前 Preset 有有效按需组时才出现（保存后从下一个模型步骤生效），没有有效按需组时模型看不到它；它由插件自动管理，不出现在本页工具目录中，也不能在这里开关或分组。",
 		].join("\n");
@@ -611,7 +690,7 @@ window.__ModuleLoader__.load({
 		// paragraphs have to name the other tool. The header keeps one help
 		// entry point and picks the wording from the preset loading mode.
 		const TOOL_CATALOG_HELP_MCP = [
-			"关掉后立刻对模型隐藏。按需组只声明组名与描述，组内工具不单独声明；模型用 tool_find 读取整组用法后可直接按名调用，不需要开组。",
+			"关掉后立刻对模型隐藏。分组可设为常驻、按需或关闭：常驻组直接声明，按需组只声明组名与描述、组内工具不单独声明，模型用 tool_find 读取整组用法后可直接按名调用；关闭组整组不声明，组内成员还可以单独禁用。",
 			"",
 			"tool_find 由插件自动注册，不出现在本页目录中，也不能在这里开关或分组；它只在当前 Preset 有有效按需组时出现。",
 			"",
@@ -899,6 +978,8 @@ window.__ModuleLoader__.load({
 					name: nextGroupName(preset.policy.groups),
 					description: "",
 					patterns: [],
+					loading: "ondemand",
+					disabled: [],
 					query: "",
 					generating: false,
 					generateError: "",
@@ -907,7 +988,7 @@ window.__ModuleLoader__.load({
 
 			function resetPresetConfig() {
 				if (!hasPresetConfig) return;
-				if (!window.confirm("确定重置当前 Preset 的配置吗？这会清空它的全部按需组和已关闭工具，加载模式与「压缩后保留」保持不变；只修改页面草稿，保存后生效。")) return;
+				if (!window.confirm("确定重置当前 Preset 的配置吗？这会清空它的全部组和已关闭工具，加载模式与「压缩后保留」保持不变；只修改页面草稿，保存后生效。")) return;
 				mutatePreset((target) => {
 					target.policy = resetPresetPolicy(target.policy);
 				});
@@ -990,9 +1071,32 @@ window.__ModuleLoader__.load({
 					name: group.name || "",
 					description: group.description || "",
 					patterns: members,
+					loading: groupLoading(group),
+					disabled: [...groupDisabled(group)],
 					query: "",
 					generating: false,
 					generateError: "",
+				});
+			}
+
+			function setGroupLoading(key, value) {
+				mutatePreset((target) => {
+					const group = (target.policy.groups || []).find((item) => item._key === key);
+					if (!group) return;
+					if (value === "always" || value === "off") group.loading = value;
+					else delete group.loading;
+				});
+			}
+
+			function setGroupMemberDisabled(key, toolName, disabled) {
+				mutatePreset((target) => {
+					const group = (target.policy.groups || []).find((item) => item._key === key);
+					if (!group) return;
+					const next = new Set(group.disabled || []);
+					if (disabled) next.add(toolName);
+					else next.delete(toolName);
+					if (next.size === 0) delete group.disabled;
+					else group.disabled = [...next];
 				});
 			}
 
@@ -1006,6 +1110,16 @@ window.__ModuleLoader__.load({
 
 			function patchModal(patch) {
 				setModal((current) => current ? { ...current, ...patch } : current);
+			}
+
+			function toggleModalDisabled(toolName) {
+				setModal((current) => {
+					if (!current) return current;
+					const next = new Set(current.disabled || []);
+					if (next.has(toolName)) next.delete(toolName);
+					else next.add(toolName);
+					return { ...current, disabled: [...next], generateError: "" };
+				});
 			}
 
 			function patchAiConfirm(patch) {
@@ -1064,7 +1178,11 @@ window.__ModuleLoader__.load({
 				const description = String(modal.description || "").trim();
 				const eligible = new Set(eligibleGroupTools(preset, modal.key).map((tool) => tool.name));
 				const patterns = [...new Set(modal.patterns || [])].filter((toolName) => eligible.has(toolName));
+				const selected = new Set(patterns);
+				const groupDisabled = [...new Set(modal.disabled || [])].filter((toolName) => selected.has(toolName));
+				const loading = modal.loading === "always" || modal.loading === "off" ? modal.loading : undefined;
 				if (!name || patterns.length === 0) return;
+				if (patterns.every((toolName) => groupDisabled.includes(toolName))) return;
 				const created = modal.mode === "create";
 				const key = modal.key;
 				mutatePreset((target) => {
@@ -1072,7 +1190,14 @@ window.__ModuleLoader__.load({
 					const clash = target.policy.groups.some((item) => item._key !== key && String(item.name || "").toLowerCase() === name.toLowerCase());
 					if (clash) return;
 					if (created) {
-						target.policy.groups.push({ _key: key, name, description, patterns });
+						target.policy.groups.push({
+							_key: key,
+							name,
+							description,
+							patterns,
+							...(loading === undefined ? {} : { loading }),
+							...(groupDisabled.length === 0 ? {} : { disabled: groupDisabled }),
+						});
 						return;
 					}
 					const group = target.policy.groups.find((item) => item._key === key);
@@ -1080,6 +1205,10 @@ window.__ModuleLoader__.load({
 					group.name = name;
 					group.description = description;
 					group.patterns = patterns;
+					if (loading === undefined) delete group.loading;
+					else group.loading = loading;
+					if (groupDisabled.length === 0) delete group.disabled;
+					else group.disabled = groupDisabled;
 				});
 				setModal(null);
 				if (created) setExpanded((current) => ({ ...current, [key]: true }));
@@ -1188,13 +1317,19 @@ window.__ModuleLoader__.load({
 			function save() {
 				for (const item of draft.presets || []) {
 					if (item.broken) continue;
-					// Groups are inert in mcp mode, so a stale/empty group must not
-					// block saving the mode switch.
-					if (item.policy.mode === "mcp") continue;
-					const issues = groupDraftIssues(item);
+					// MCP mode keeps groups for tool_find; stale default/ondemand
+					// groups should not block saving, but explicit always/off groups
+					// still carry loading semantics and must be valid.
+					let checkItem = item;
+					if (item.policy.mode === "mcp") {
+						const groups = (item.policy.groups || []).filter((group) => group.loading === "always" || group.loading === "off");
+						if (groups.length === 0) continue;
+						checkItem = { ...item, policy: { ...item.policy, groups } };
+					}
+					const issues = groupDraftIssues(checkItem);
 					if (issues.disabledMembers.length) {
 						const issue = issues.disabledMembers[0];
-						setError("Preset “" + item.id + "”中的已关闭工具“" + issue.tool + "”不能加入分组“" + issue.group + "”。请从分组移除或重新开启该工具。");
+						setError("Preset “" + item.id + "”中的已关闭工具“" + issue.tool + "”落在分组“" + issue.group + "”的匹配范围内。Preset 级已关闭工具不能与分组重叠，请从分组移除该工具或取消它的关闭状态。");
 						setMessage("");
 						return;
 					}
@@ -1267,28 +1402,48 @@ window.__ModuleLoader__.load({
 				const title = String(group.name || "").toLowerCase();
 				const description = String(group.description || "").toLowerCase();
 				const members = matchingTools(preset.tools, group.patterns);
+				const loading = groupLoading(group);
+				if (filter === "cold" && loading !== "ondemand") return false;
+				if (filter === "live" && loading !== "always") return false;
+				if (filter === "disabled" && loading !== "off") return false;
 				if (!needle) return true;
 				return title.includes(needle) || description.includes(needle) || members.some((tool) => matchesQuery(tool, needle));
 			});
-			const showGroups = filter === "all" || filter === "cold";
+			const showGroups = filter === "all" || filter === "cold" || filter === "live" || filter === "disabled";
 			const visibleTools = (preset.tools || []).filter((tool) => {
 				if (!matchesQuery(tool, needle)) return false;
 				if (filter === "cold") return false;
-				if (filter === "disabled") return disabled.has(tool.name);
-				if (filter === "live") return !disabled.has(tool.name) && !grouped.has(tool.name);
+				if (filter === "disabled") {
+					const owner = groupOfTool(preset, tool.name);
+					// A closed group is already represented by its group card and
+					// its “已关闭 N 个工具” summary; don't repeat every member here.
+					if (owner && groupLoading(owner) === "off") return false;
+					return toolDisabled(preset, tool.name);
+				}
+				if (filter === "live") return !toolDisabled(preset, tool.name) && !grouped.has(tool.name);
 				return !grouped.has(tool.name);
 			});
 			const orphans = (preset.policy.disabled || []).filter((name) => !(preset.tools || []).some((tool) => tool.name === name));
 			const modalNeedle = String(modal && modal.query || "").trim().toLowerCase();
 			const modalSelected = new Set(modal ? modal.patterns || [] : []);
+			const modalGroupDisabled = new Set(modal ? modal.disabled || [] : []);
+			const modalLoading = modal && (modal.loading === "always" || modal.loading === "off") ? modal.loading : "ondemand";
+			const modalHint = modalLoading === "always"
+				? "勾选要常驻的工具；取消勾选或点「禁用」都不会向模型声明。"
+				: modalLoading === "off"
+					? "整组关闭时不声明；切回「常驻 / 按需」后按这里的勾选恢复。"
+					: "筛选后勾选要收进该组的工具。确定后会显示在按需里。";
 			const modalEligibleTools = modal ? eligibleGroupTools(preset, modal.key) : [];
 			const modalEligibleNames = new Set(modalEligibleTools.map((tool) => tool.name));
 			const pickerTools = modal ? (preset.tools || []).filter((tool) =>
 				(modalEligibleNames.has(tool.name) || modalSelected.has(tool.name)) && matchesQuery(tool, modalNeedle)) : [];
 			const visibleSelected = pickerTools.filter((tool) => modalSelected.has(tool.name)).map((tool) => tool.name);
 			const modalMatchedTools = modal ? matchingTools(preset.tools, modal.patterns || []).filter((tool) => modalEligibleNames.has(tool.name)) : [];
+			const modalEnabledCount = modalMatchedTools.filter((tool) => (
+				!disabled.has(tool.name) && !modalGroupDisabled.has(tool.name)
+			)).length;
 			const modalInvalidSelected = modal ? [...modalSelected].filter((name) => !modalEligibleNames.has(name)) : [];
-			const canConfirm = !!(modal && String(modal.name || "").trim() && modalMatchedTools.length > 0 && modalInvalidSelected.length === 0);
+			const canConfirm = !!(modal && String(modal.name || "").trim() && modalEnabledCount > 0 && modalInvalidSelected.length === 0);
 			const listedGroups = showGroups ? visibleGroups : [];
 			const aiIsAutoGroup = !!(aiConfirm && aiConfirm.kind === "auto-group");
 			const aiNeedle = String(aiConfirm && aiConfirm.query || "").trim().toLowerCase();
@@ -1320,31 +1475,69 @@ window.__ModuleLoader__.load({
 				patchAiConfirm(patch);
 			}
 
+			function groupModeOptions() {
+				return [
+					h("option", { value: "always", style: { color: "#22c55e" } }, "常驻"),
+					h("option", { value: "ondemand", style: { color: "#818cf8" } }, "按需"),
+					h("option", { value: "off", style: { color: "#f87171" } }, "关闭"),
+				];
+			}
+
 			function renderGroup(group) {
 				const key = group._key;
 				const open = !!expanded[key];
 				const members = matchingTools(preset.tools, group.patterns);
 				const estimate = groupTokens.get(key) || null;
 				const title = (group.name || "").trim() || "未命名分组";
+				const loading = groupLoading(group);
+				const groupDisabledSet = new Set(groupDisabled(group));
+				const memberStatus = (tool) => {
+					if (disabled.has(tool.name) || loading === "off" || groupDisabledSet.has(tool.name)) return { label: "关闭", className: "off" };
+					return loading === "always" ? { label: "常驻", className: "live" } : { label: "按需", className: "cold" };
+				};
 				return h("div", { className: "tm_group", key: key },
 					h("div", { className: "tm_group_bar" },
 						h("button", { className: "tm_chevron", title: open ? "收起" : "展开", onClick: () => setExpanded((current) => ({ ...current, [key]: !current[key] })) }, open ? "▾" : "▸"),
 						h("button", { className: "tm_group_main", onClick: () => setExpanded((current) => ({ ...current, [key]: !current[key] })) },
-							h("div", { className: "tm_group_title" }, title, h("span", { className: "tm_badge cold" }, "按需")),
+							h("div", { className: "tm_group_title" }, title),
 							h("div", { className: "tm_group_sub" }, group.description || "没有描述"),
 						),
-						estimate && estimate.schema > 0 ? tokenBadge(estimate.net, "估算（" + unitNote + "）：组内工具 " + formatTokenAmount(estimate.schema) + " tok · 关闭时目录行 " + formatTokenAmount(estimate.catalog) + " tok · 收起净省 " + formatTokenAmount(estimate.net) + " tok/轮") : null,
-						h("span", { className: "tm_group_count" }, members.length + " 个工具"),
+						h("select", {
+							className: "tm_group_mode " + loading,
+							value: loading,
+							title: preset.policy.mode === "mcp"
+								? "常驻＝直接声明；按需＝tool_find 读取后按名调用；关闭＝整组不声明"
+								: "常驻＝直接声明；按需＝tool_list 打开后使用；关闭＝整组不声明",
+							onChange: (event) => setGroupLoading(key, event.target.value),
+						}, groupModeOptions()),
+						loading === "off"
+							? h("span", { className: "tm_muted" }, "已关闭 " + members.length + " 个工具")
+							: estimate && estimate.schema > 0
+								? tokenBadge(estimate.net, loading === "always"
+									? "估算（" + unitNote + "）：组内工具常驻 " + formatTokenAmount(estimate.schema) + " tok/轮"
+									: "估算（" + unitNote + "）：组内工具 " + formatTokenAmount(estimate.schema) + " tok · 关闭时目录行 " + formatTokenAmount(estimate.catalog) + " tok · 收起净省 " + formatTokenAmount(estimate.net) + " tok/轮")
+								: null,
+						loading === "off" ? null : h("span", { className: "tm_group_count" }, members.length + " 个工具"),
 						h("button", { className: "tm_btn", onClick: () => openEdit(group) }, "编辑"),
 						h("button", { className: "tm_btn", onClick: () => deleteGroup(key) }, "删除"),
 					),
 					open ? h("div", { className: "tm_group_body" }, members.length
 						? members.map((tool) => {
 							const tokens = toolTokens(tool);
-							const isDisabled = disabled.has(tool.name);
-							return h("div", { className: "tm_member", key: tool.name },
-								h("div", { className: "tm_tool_name" }, tool.name, isDisabled ? h("span", { className: "tm_badge off" }, "关闭") : null, tokenBadge(tokens, "估算（" + unitNote + "）：" + (isDisabled ? "已关闭，开启后常驻 " : "单工具常驻 ") + formatTokenAmount(tokens) + " tok/轮")),
-								h("div", { className: "tm_tool_desc", title: tool.description }, tool.description),
+							const status = memberStatus(tool);
+							const memberTag = loading === "off" ? "div" : "label";
+							return h(memberTag, { className: "tm_member", key: tool.name },
+								loading === "off" ? null : h("input", {
+									type: "checkbox",
+									checked: !groupDisabledSet.has(tool.name) && !disabled.has(tool.name),
+									disabled: disabled.has(tool.name),
+									title: disabled.has(tool.name) ? "该工具由 Preset 级设置关闭" : "取消勾选＝在本组内禁用此工具",
+									onChange: (event) => setGroupMemberDisabled(key, tool.name, !event.target.checked),
+								}),
+								h("span", null,
+									h("div", { className: "tm_tool_name" }, tool.name, h("span", { className: "tm_badge " + status.className }, status.label), tokenBadge(tokens, "估算（" + unitNote + "）：" + formatTokenAmount(tokens) + " tok/轮")),
+									h("div", { className: "tm_tool_desc", title: tool.description }, tool.description),
+								),
 							);
 						})
 						: h("div", { className: "tm_error" }, "无效空组：请编辑并选择至少一个可用工具，或删除该组。"),
@@ -1353,13 +1546,29 @@ window.__ModuleLoader__.load({
 			}
 
 			function renderTool(tool) {
-				const enabled = !disabled.has(tool.name);
+				const owner = groupOfTool(preset, tool.name);
+				const enabled = !toolDisabled(preset, tool.name);
 				const tokens = toolTokens(tool);
+				const groupName = owner ? (String(owner.name || "").trim() || "未命名分组") : "";
+				const ownerLoading = owner ? groupLoading(owner) : "ondemand";
 				return h("label", { className: "tm_tool", key: tool.name },
-					h("input", { type: "checkbox", checked: enabled, onChange: () => toggleTool(tool.name) }),
+					h("input", {
+						type: "checkbox",
+						checked: enabled,
+						disabled: !!owner,
+						title: owner ? "该工具由分组「" + groupName + "」控制，请在分组中调整" : undefined,
+						onChange: () => { if (!owner) toggleTool(tool.name); },
+					}),
 					h("span", null,
 						h("div", { className: "tm_tool_name" }, tool.name,
-							!enabled ? h("span", { className: "tm_badge off" }, "关闭") : h("span", { className: "tm_badge live" }, "常开"),
+							enabled ? h("span", { className: "tm_badge live" }, "常驻") : h("span", { className: "tm_badge off" }, "关闭"),
+							owner && filter === "disabled"
+								? h("span", null,
+									h("span", { className: "tm_group_ref" }, "所属组："),
+									h("span", { className: "tm_badge " + (ownerLoading === "always" ? "live" : "cold") }, ownerLoading === "always" ? "常驻" : "按需"),
+									h("span", { className: "tm_group_name" }, groupName),
+								)
+								: null,
 						),
 						h("div", { className: "tm_tool_desc", title: tool.description }, tool.description),
 					),
@@ -1643,13 +1852,13 @@ window.__ModuleLoader__.load({
 			) : null;
 
 			const dialog = modal && typeof document !== "undefined" ? reactDom.createPortal(
-				h("div", { className: "tm_modal", role: "dialog", "aria-modal": "true", "aria-label": modal.mode === "create" ? "新建按需组" : "编辑按需组" },
+				h("div", { className: "tm_modal", role: "dialog", "aria-modal": "true", "aria-label": modal.mode === "create" ? "新建分组" : "编辑分组" },
 					h("div", { className: "tm_modal_mask", onMouseDown: () => setModal(null) }),
 					h("div", { className: "tm_modal_card" },
 						h("div", { className: "tm_modal_head" },
 							h("div", null,
-								h("h3", null, modal.mode === "create" ? "新建按需组" : "编辑按需组"),
-								h("div", { className: "tm_muted" }, "筛选后勾选要收进该组的工具。确定后会显示在按需里。"),
+								h("h3", null, modal.mode === "create" ? "新建分组" : "编辑分组"),
+								h("div", { className: "tm_muted" }, modalHint),
 							),
 							h("button", { className: "tm_btn", onClick: () => setModal(null) }, "关闭"),
 						),
@@ -1657,6 +1866,14 @@ window.__ModuleLoader__.load({
 							h("div", { className: "tm_row" },
 								h("input", { className: "tm_input", value: modal.name, placeholder: "名称（模型用这个打开）", onChange: (e) => patchModal({ name: e.target.value, generateError: "" }) }),
 								h("button", { className: "tm_btn", disabled: modal.generating || modalMatchedTools.length === 0 || modalInvalidSelected.length > 0, onClick: generateGroupDetails }, modal.generating ? "生成中…" : "自动生成名称和描述"),
+							),
+							h("div", { className: "tm_row" },
+								h("span", { className: "tm_muted" }, "加载"),
+								h("select", {
+									className: "tm_group_mode " + modalLoading,
+									value: modalLoading,
+									onChange: (e) => patchModal({ loading: e.target.value }),
+								}, groupModeOptions()),
 							),
 							renderGenerationPicker(),
 							modal.generateError ? h("div", { className: "tm_error" }, modal.generateError) : null,
@@ -1669,9 +1886,11 @@ window.__ModuleLoader__.load({
 							),
 							modalInvalidSelected.length
 								? h("div", { className: "tm_error" }, "以下工具已关闭或属于其他分组，不能加入当前组：" + modalInvalidSelected.join(", ") + "。请取消选择。")
-								: h("div", { className: modalMatchedTools.length ? "tm_muted" : "tm_error" }, modalMatchedTools.length
-									? "已选 " + modalMatchedTools.length + " 个工具。自动生成会调用" + generationLabel + "，结果仍可手动修改。"
-									: "每个按需组至少需要一个未关闭且未被其他组占用的工具。"),
+								: h("div", { className: modalEnabledCount > 0 ? "tm_muted" : "tm_error" }, modalMatchedTools.length
+									? modalLoading === "off"
+										? "已选 " + modalMatchedTools.length + " 个工具。自动生成会调用" + generationLabel + "，结果仍可手动修改。"
+										: "已选 " + modalMatchedTools.length + " 个工具，其中 " + (modalMatchedTools.length - modalEnabledCount) + " 个禁用。自动生成会调用" + generationLabel + "，结果仍可手动修改。"
+									: "每组至少需要一个未禁用的工具。"),
 							pickerTools.length
 								? h("div", { className: "tm_picker" }, pickerTools.map((tool) => h("label", { className: "tm_pick", key: tool.name },
 									h("input", {
@@ -1680,16 +1899,33 @@ window.__ModuleLoader__.load({
 										disabled: !modalEligibleNames.has(tool.name) && !modalSelected.has(tool.name),
 										onChange: (e) => {
 											const next = new Set(modal.patterns || []);
-											if (e.target.checked && modalEligibleNames.has(tool.name)) next.add(tool.name); else next.delete(tool.name);
+											if (e.target.checked && modalEligibleNames.has(tool.name)) next.add(tool.name);
+											else {
+												next.delete(tool.name);
+												const disabledNext = new Set(modal.disabled || []);
+												disabledNext.delete(tool.name);
+												patchModal({ patterns: [...next], disabled: [...disabledNext], generateError: "" });
+												return;
+											}
 											patchModal({ patterns: [...next], generateError: "" });
 										},
 									}),
 									h("span", null,
 										h("div", { className: "tm_tool_name" }, tool.name,
 											disabled.has(tool.name) ? h("span", { className: "tm_badge off" }, "已关闭")
+												: modalGroupDisabled.has(tool.name) ? h("span", { className: "tm_badge off" }, "禁用")
 												: (!modalEligibleNames.has(tool.name) ? h("span", { className: "tm_badge off" }, "其他组") : null)),
 										h("div", { className: "tm_tool_desc", title: tool.description }, tool.description),
 									),
+									modalSelected.has(tool.name) && modalLoading !== "off"
+										? h("button", {
+											type: "button",
+											className: "tm_btn",
+											style: { marginLeft: "auto", flex: "0 0 auto", fontSize: "11px", padding: "3px 7px" },
+											disabled: disabled.has(tool.name),
+											onClick: (e) => { e.preventDefault(); toggleModalDisabled(tool.name); },
+										}, modalGroupDisabled.has(tool.name) ? "取消禁用" : "禁用")
+										: null,
 								)))
 								: h("div", { className: "tm_muted" }, preset.tools.length ? "没有符合筛选的工具。" : "这个 Preset 当前没有可见工具。"),
 						),
@@ -1716,7 +1952,7 @@ window.__ModuleLoader__.load({
 								h("div", { style: { padding: "10px 14px" } }, group.tools.map((name) => h("div", { className: "tm_member tm_tool_name", key: name }, name))),
 							)),
 							autoPreview.notice ? h("div", { className: "tm_notice" }, autoPreview.notice) : null,
-							autoPreview.ungrouped.length ? h("div", { className: "tm_notice" }, "保持常开、未归组：", h("span", { className: "tm_code" }, autoPreview.ungrouped.join(", "))) : null,
+							autoPreview.ungrouped.length ? h("div", { className: "tm_notice" }, "保持常驻、未归组：", h("span", { className: "tm_code" }, autoPreview.ungrouped.join(", "))) : null,
 						),
 						h("div", { className: "tm_modal_foot" },
 							h("button", { className: "tm_btn", onClick: () => setAutoPreview(null) }, "取消"),
@@ -1734,7 +1970,7 @@ window.__ModuleLoader__.load({
 						h("div", { className: "tm_modal_head" },
 							h("div", null,
 								h("h3", null, "复制当前 Preset 配置"),
-								h("div", { className: "tm_muted" }, "将当前 Preset 的全部按需组和已关闭工具复制到勾选的 Preset；加载模式不跟随复制，「压缩后保留最近使用的按需组」会随分组一起复制；只改页面草稿，保存后生效。"),
+								h("div", { className: "tm_muted" }, "将当前 Preset 的全部组和已关闭工具复制到勾选的 Preset；每组加载方式与组内禁用会随组一起复制，加载模式不跟随复制，「压缩后保留最近使用的按需组」会随分组一起复制；只改页面草稿，保存后生效。"),
 							),
 							h("button", { className: "tm_btn", onClick: () => setCopyDialog(null) }, "关闭"),
 						),
@@ -1742,7 +1978,7 @@ window.__ModuleLoader__.load({
 							h("div", { className: "tm_notice" },
 								"源 Preset「" + (copySource.name || copySource.id) + "」（加载模式："
 								+ (copySource.policy.mode === "mcp" ? "MCP 按需" : "默认") + "）："
-								+ (copySource.policy.groups || []).length + " 个按需组、"
+								+ (copySource.policy.groups || []).length + " 个组、"
 								+ (copySource.policy.disabled || []).length + " 个已关闭工具。"
 								+ "勾选的目标 Preset 现有分组和关闭项将被整份覆盖，加载模式不变，「压缩后保留」跟随源 Preset。",
 							),
@@ -1808,7 +2044,7 @@ window.__ModuleLoader__.load({
 
 			return h("div", { className: "tm_root" },
 				h("div", { className: "tm_head" },
-					h("div", null, h("h2", null, "Agent 工具管理"), h("div", { className: "tm_muted" }, "按每个 Agent 预设开关工具。点「手动分组」把不常用的收进按需组：平时模型看不到，需要时先查目录再打开。")),
+					h("div", null, h("h2", null, "Agent 工具管理"), h("div", { className: "tm_muted" }, "按每个 Agent 预设开关工具。点「手动分组」把工具整理成常驻、按需或关闭组：常驻组直接可用，按需组平时模型看不到、需要时先查目录再打开，关闭组整组不声明。")),
 					h("div", { className: "tm_row" },
 						h("button", { className: "tm_btn", onClick: reload, disabled: busy || autoGrouping }, "刷新"),
 						h("button", {
@@ -1889,7 +2125,7 @@ window.__ModuleLoader__.load({
 								onClick: resetPresetConfig,
 								disabled: autoGrouping || busy || !draft.writable || !hasPresetConfig,
 								title: hasPresetConfig
-									? "清空当前 Preset 的全部按需组和已关闭工具（加载模式与压缩后保留保持不变）"
+									? "清空当前 Preset 的全部组和已关闭工具（加载模式与压缩后保留保持不变）"
 									: "当前 Preset 没有可重置的配置",
 							}, "重置配置"),
 							h("button", {
@@ -1905,8 +2141,8 @@ window.__ModuleLoader__.load({
 					h("div", { className: "tm_stats" },
 						[
 							["工具总量", stats.totalTools, formatTokenAmount(tokenStats.totalTokens) + " tok", "全部 " + stats.totalTools + " 个工具合计 " + formatTokenAmount(tokenStats.totalTokens) + " tok/轮（" + unitNote + (isPtc ? "，含平台常数 " + formatTokenAmount(constantTokens) + " tok" : "") + "；全部常驻时）"],
-							["分组数量", stats.groupCount, "省 " + formatTokenAmount(tokenStats.onDemandSavings) + " tok", "全部 " + tokenStats.onDemandGroups + " 个按需组收起：组内工具合计 " + formatTokenAmount(tokenStats.onDemandTokens) + " tok − 关闭态目录行 " + formatTokenAmount(onDemandCatalogTokens) + " tok = 净省 " + formatTokenAmount(tokenStats.onDemandSavings) + " tok/轮"],
-							["未分组工具", stats.ungroupedTools, formatTokenAmount(tokenStats.alwaysOnTokens) + " tok", "未分组且未关闭的 " + tokenStats.alwaysOnTools + " 个工具每轮常驻 " + formatTokenAmount(tokenStats.alwaysOnTokens) + " tok"],
+							["分组数量", stats.groupCount, "省 " + formatTokenAmount(tokenStats.onDemandSavings) + " tok", "其中 " + tokenStats.onDemandGroups + " 个按需组收起：组内工具合计 " + formatTokenAmount(tokenStats.onDemandTokens) + " tok − 关闭态目录行 " + formatTokenAmount(onDemandCatalogTokens) + " tok = 净省 " + formatTokenAmount(tokenStats.onDemandSavings) + " tok/轮"],
+							["常驻工具", stats.ungroupedTools, formatTokenAmount(tokenStats.alwaysOnTokens) + " tok", "未分组或常驻组内且未关闭的 " + tokenStats.alwaysOnTools + " 个工具每轮常驻 " + formatTokenAmount(tokenStats.alwaysOnTokens) + " tok"],
 							["按需工具", stats.onDemandTools, formatTokenAmount(tokenStats.onDemandTokens) + " tok", "按需组内 " + tokenStats.onDemandTools + " 个工具合计 " + formatTokenAmount(tokenStats.onDemandTokens) + " tok；收起后仍会注入目录行 " + formatTokenAmount(onDemandCatalogTokens) + " tok，实际净省见「分组数量」卡"],
 							["已关闭工具", stats.disabledTools, formatTokenAmount(tokenStats.disabledTokens) + " tok", "已关闭的 " + tokenStats.disabledTools + " 个工具关闭可省 " + formatTokenAmount(tokenStats.disabledTokens) + " tok/轮"],
 							...(isPtc
@@ -1919,7 +2155,7 @@ window.__ModuleLoader__.load({
 					h("div", { className: "tm_row", style: { padding: "10px 14px" } },
 						h("input", { className: "tm_input", value: query, placeholder: "搜索工具名、描述或组名", onChange: (e) => setQuery(e.target.value) }),
 						h("div", { className: "tm_filters" },
-							[["all", "全部"], ["live", "常开"], ["cold", "按需"], ["disabled", "已关闭"]].map(([id, label]) =>
+							[["all", "全部"], ["live", "常驻"], ["cold", "按需"], ["disabled", "已关闭"]].map(([id, label]) =>
 								h("button", { key: id, className: "tm_chip" + (filter === id ? " active" : ""), onClick: () => setFilter(id) }, label),
 							),
 						),

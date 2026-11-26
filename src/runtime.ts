@@ -28,13 +28,14 @@ import {
   asRecord,
   denyNames,
   findGroup,
+  groupForTool,
   isMcpMode,
   matchesAnyPattern,
   mcpGroupedNames,
   mcpGroups,
   parseKnownRestrictable,
   policyFor,
-  resolveActiveGroups,
+  resolveOnDemandGroups,
   sameNames,
 } from "./policy.js";
 import {
@@ -182,7 +183,7 @@ export class ToolPolicyRuntime {
         continue;
       }
       const known = new Set(
-        resolveActiveGroups(policy, state.baseline).map((group) => group.name.toLowerCase()),
+        resolveOnDemandGroups(policy, state.baseline).map((group) => group.name.toLowerCase()),
       );
       for (const name of [...state.exposures]) {
         if (!known.has(name.toLowerCase())) state.exposures.delete(name);
@@ -201,7 +202,7 @@ export class ToolPolicyRuntime {
     const policy = this.policy(agent);
     const exposures = new Set<string>();
     if (!isMcpMode(policy)) {
-      const groups = resolveActiveGroups(policy, baseline);
+      const groups = resolveOnDemandGroups(policy, baseline);
       const restored = restoredExposureNames(agent.session, {
         groups,
         keepAfterCompaction: policy.keepAfterCompaction,
@@ -334,25 +335,23 @@ export class ToolPolicyRuntime {
     const scopedTools = state.agent.ctx.get<ToolRuntimeLike>("tools");
     state.guard = scopedTools?.guard?.((execution) => {
       const policy = this.policy(state.agent);
-      if (isMcpMode(policy)) {
-        // Hidden tools are blocked by step admission (they are not in the step
-        // set), so the guard only has to enforce an explicit disable.
-        if (policy.disabled.includes(execution.name)) {
-          return `tool ${JSON.stringify(execution.name)} is disabled by the tool-manager policy for this Agent preset`;
-        }
-        return undefined;
-      }
       const hidden = denyNames(policy, state.baseline, state.exposures);
       if (!hidden.includes(execution.name)) return undefined;
       if (policy.disabled.includes(execution.name)) {
         return `tool ${JSON.stringify(execution.name)} is disabled by the tool-manager policy for this Agent preset`;
       }
-      const open = new Set([...state.exposures].map((name) => name.toLowerCase()));
-      const group = resolveActiveGroups(policy, state.baseline).find((item) => (
-        !open.has(item.name.toLowerCase()) && item.tools.includes(execution.name)
-      ));
-      if (group) {
-        return `tool ${JSON.stringify(execution.name)} belongs to on-demand group ${JSON.stringify(group.name)} which is not open; call ${DISCOVERY_TOOL_NAME} with ${JSON.stringify({ group: group.name })} first`;
+      const group = groupForTool(policy, state.baseline, execution.name);
+      if (group?.loading === "off") {
+        return `tool ${JSON.stringify(execution.name)} belongs to group ${JSON.stringify(group.name)} which is off`;
+      }
+      if (group?.disabled.includes(execution.name)) {
+        return `tool ${JSON.stringify(execution.name)} is disabled inside group ${JSON.stringify(group.name)}`;
+      }
+      if (group && group.loading === "ondemand") {
+        const open = new Set([...state.exposures].map((name) => name.toLowerCase()));
+        if (!open.has(group.name.toLowerCase())) {
+          return `tool ${JSON.stringify(execution.name)} belongs to on-demand group ${JSON.stringify(group.name)} which is not open; call ${DISCOVERY_TOOL_NAME} with ${JSON.stringify({ group: group.name })} first`;
+        }
       }
       return `tool ${JSON.stringify(execution.name)} is unavailable under the tool-manager policy for this Agent preset`;
     });
@@ -494,7 +493,7 @@ export class ToolPolicyRuntime {
     // `tool_list` is the last chance to see a group whose tools appeared after
     // this Agent's snapshot; resolve it against the live surface, not the old one.
     this.syncBaseline(state);
-    const groups = resolveActiveGroups(this.policy(agent), state.baseline);
+    const groups = resolveOnDemandGroups(this.policy(agent), state.baseline);
     const known = groups.map((item) => item.name).join(", ") || "(none)";
     if (requestedGroup === undefined || requestedGroup.trim() === "") {
       throw new Error(`group is required; known groups: ${known}`);
@@ -589,7 +588,7 @@ export class ToolPolicyRuntime {
     state.exposureScanSeq = session.seq;
     const limit = policy.keepAfterCompaction;
     if (!compacted || limit === undefined) return;
-    const groups = resolveActiveGroups(policy, state.baseline);
+    const groups = resolveOnDemandGroups(policy, state.baseline);
     const folded = restoredExposureNames(session, { groups, keepAfterCompaction: limit });
     const next = new Set<string>();
     for (const name of folded) {
@@ -638,7 +637,7 @@ export class ToolPolicyRuntime {
         })),
       }, mcpNoticeHistory(agent));
     }
-    const groups = resolveActiveGroups(policy, state.baseline);
+    const groups = resolveOnDemandGroups(policy, state.baseline);
     const history = catalogHistory(agent);
     if (state.catalogReset) {
       history.reset = true;
@@ -1503,13 +1502,18 @@ function declaredToolNames(policy: PresetToolPolicy): string[] {
   return names;
 }
 
-/** Groups that are not open in this Agent, so their members stay folded. */
+/** Groups whose members stay folded: every `off` group, plus unopened `ondemand` groups. */
 function foldedGroups(
   policy: PresetToolPolicy,
   exposures: ReadonlySet<string>,
 ): PresetToolPolicy["groups"] {
   const open = new Set([...exposures].map((name) => name.toLowerCase()));
-  return policy.groups.filter((group) => !open.has(group.name.toLowerCase()));
+  return policy.groups.filter((group) => {
+    const loading = group.loading ?? "ondemand";
+    if (loading === "always") return false;
+    if (loading === "off") return true;
+    return !open.has(group.name.toLowerCase());
+  });
 }
 
 /**
@@ -1531,7 +1535,14 @@ function policyHides(
   // folded, so neither may lose its section to a stray group pattern.
   if (toolName === PTC_TRANSPORT_NAME || toolName === DISCOVERY_TOOL_NAME) return false;
   if (policy.disabled.includes(toolName)) return true;
-  return folded.some((group) => matchesAnyPattern(toolName, group.patterns));
+  // Always groups are not part of `folded`, but their own disables still hide
+  // a tool section even when that member is missing from the baseline.
+  if (policy.groups.some((group) => (
+    (group.loading ?? "ondemand") === "always" && (group.disabled ?? []).includes(toolName)
+  ))) return true;
+  return folded.some((group) => (
+    (group.disabled ?? []).includes(toolName) || matchesAnyPattern(toolName, group.patterns)
+  ));
 }
 
 function errorMessage(error: unknown): string {
