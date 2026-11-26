@@ -9,6 +9,7 @@ import {
   normalizeGroupNames,
   parseAutoGroupResult,
   parseGroupSuggestion,
+  resolveGenerationSelection,
   selectSuggestionTools,
   validateGenerationTimeout,
 } from "../dist/suggest.js";
@@ -299,5 +300,140 @@ describe("tool-manager group suggestions", () => {
     await assert.rejects(() => generateGroupSuggestion({ async *stream() {} }, {
       currentSelection: () => ({ provider: "", model: "" }),
     }, { tools: [tools[0]], otherGroupNames: [] }), /没有配置默认模型/);
+  });
+});
+
+describe("generation model selection", () => {
+  const catalog = {
+    listProviders: () => [{ id: "magpie", name: "Magpie" }, { id: "deepseek", name: "DeepSeek" }],
+    listModels: async (provider) => {
+      if (provider === "magpie") return [{ id: "flash" }, { id: "pro" }];
+      if (provider === "deepseek") return [{ id: "chat" }];
+      throw new Error(`unknown provider ${provider}`);
+    },
+    resolveModelInfo: async (provider, model) => {
+      if (provider !== "magpie") return { provider, id: model, name: model };
+      return {
+        provider,
+        id: model,
+        name: model,
+        reasoning: {
+          efforts: [{ id: "low" }, { id: "max" }],
+          ...(model === "pro" ? {} : { defaultEffort: "low" }),
+        },
+      };
+    },
+  };
+  const deploymentDefault = { currentSelection: () => ({ provider: "deepseek", model: "chat", reasoningEffort: "max" }) };
+
+  it("follows the default model when nothing was chosen", async () => {
+    const resolved = await resolveGenerationSelection(catalog, deploymentDefault, undefined);
+    assert.deepEqual(resolved.selection, { provider: "deepseek", model: "chat", reasoningEffort: "max" });
+    assert.equal(resolved.notice, undefined);
+  });
+
+  it("keeps the default model while overriding only its effort", async () => {
+    const fastDefault = { currentSelection: () => ({ provider: "magpie", model: "flash", reasoningEffort: "max" }) };
+    const resolved = await resolveGenerationSelection(catalog, fastDefault, { reasoningEffort: "low" });
+    assert.deepEqual(resolved.selection, { provider: "magpie", model: "flash", reasoningEffort: "low" });
+    assert.equal(resolved.notice, undefined);
+
+    // The route is not pinned, so a level the route does not declare is still
+    // replaced by that route's own default instead of failing the request.
+    const replaced = await resolveGenerationSelection(catalog, fastDefault, { reasoningEffort: "nuclear" });
+    assert.deepEqual(replaced.selection, { provider: "magpie", model: "flash", reasoningEffort: "low" });
+    assert.match(replaced.notice, /不支持推理强度「nuclear」/);
+
+    // Nothing to check the level against: forward it as chosen.
+    const unchecked = await resolveGenerationSelection(undefined, fastDefault, { reasoningEffort: "low" });
+    assert.deepEqual(unchecked.selection, { provider: "magpie", model: "flash", reasoningEffort: "low" });
+    assert.equal(unchecked.notice, undefined);
+  });
+
+  it("uses an available chosen model with its own effort", async () => {
+    const resolved = await resolveGenerationSelection(catalog, deploymentDefault, {
+      provider: "magpie", model: "flash", reasoningEffort: "low",
+    });
+    assert.deepEqual(resolved.selection, { provider: "magpie", model: "flash", reasoningEffort: "low" });
+    assert.equal(resolved.notice, undefined);
+  });
+
+  it("falls back to the default model when the chosen provider is gone", async () => {
+    const resolved = await resolveGenerationSelection(catalog, deploymentDefault, {
+      provider: "retired", model: "flash",
+    });
+    assert.deepEqual(resolved.selection, { provider: "deepseek", model: "chat", reasoningEffort: "max" });
+    assert.match(resolved.notice, /retired\/flash/);
+    assert.match(resolved.notice, /Provider 当前不可用/);
+    assert.match(resolved.notice, /已回退到默认模型「deepseek\/chat」/);
+  });
+
+  it("falls back to the default model when the chosen model is gone", async () => {
+    const resolved = await resolveGenerationSelection(catalog, deploymentDefault, {
+      provider: "magpie", model: "removed",
+    });
+    assert.deepEqual(resolved.selection, { provider: "deepseek", model: "chat", reasoningEffort: "max" });
+    assert.match(resolved.notice, /magpie\/removed.*已被删除或未配置/);
+  });
+
+  it("keeps the chosen model when its catalog cannot be read", async () => {
+    const broken = {
+      listProviders: () => [{ id: "magpie", name: "Magpie" }],
+      listModels: async () => { throw new Error("provider unreachable"); },
+    };
+    const resolved = await resolveGenerationSelection(broken, deploymentDefault, { provider: "magpie", model: "flash" });
+    assert.deepEqual(resolved.selection, { provider: "magpie", model: "flash" });
+    assert.equal(resolved.notice, undefined);
+  });
+
+  it("replaces an effort the chosen model does not declare", async () => {
+    const replaced = await resolveGenerationSelection(catalog, deploymentDefault, {
+      provider: "magpie", model: "flash", reasoningEffort: "nuclear",
+    });
+    assert.deepEqual(replaced.selection, { provider: "magpie", model: "flash", reasoningEffort: "low" });
+    assert.match(replaced.notice, /不支持推理强度「nuclear」/);
+    assert.match(replaced.notice, /默认强度「low」/);
+
+    // No default effort to fall back to: the effort is dropped, not forwarded.
+    const dropped = await resolveGenerationSelection(catalog, deploymentDefault, {
+      provider: "magpie", model: "pro", reasoningEffort: "nuclear",
+    });
+    assert.deepEqual(dropped.selection, { provider: "magpie", model: "pro" });
+    assert.match(dropped.notice, /已改为不指定推理强度/);
+  });
+
+  it("drops an effort when the chosen model declares no reasoning support", async () => {
+    const resolved = await resolveGenerationSelection(catalog, deploymentDefault, {
+      provider: "deepseek", model: "chat", reasoningEffort: "low",
+    });
+    assert.deepEqual(resolved.selection, { provider: "deepseek", model: "chat" });
+    assert.match(resolved.notice, /不支持推理强度「low」/);
+  });
+
+  it("uses the chosen model unchecked when the Host publishes no catalog", async () => {
+    const resolved = await resolveGenerationSelection(undefined, deploymentDefault, {
+      provider: "magpie", model: "flash", reasoningEffort: "low",
+    });
+    assert.deepEqual(resolved.selection, { provider: "magpie", model: "flash", reasoningEffort: "low" });
+    assert.equal(resolved.notice, undefined);
+  });
+
+  it("runs a pre-resolved selection instead of the default model", async () => {
+    let options;
+    const llm = {
+      async *stream(value) {
+        options = value;
+        yield { type: "text-delta", index: 0, text: '{"groups":[{"name":"快速","description":"说明。","tools":["web_search"]}],"ungrouped":[]}' };
+        yield { type: "finish", reason: { kind: "stop" } };
+      },
+    };
+    await generateAutoGroups(llm, deploymentDefault, {
+      tools: [tools[0]],
+      otherGroupNames: [],
+      selection: { provider: "magpie", model: "flash", reasoningEffort: "low" },
+    });
+    assert.equal(options.provider, "magpie");
+    assert.equal(options.model, "flash");
+    assert.equal(options.reasoningEffort, "low");
   });
 });

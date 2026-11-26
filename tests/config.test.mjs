@@ -59,4 +59,30 @@ describe("tool-manager config store", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it("writes the generation model on its own, without a page revision", async () => {
+    const root = await mkdtemp(join(tmpdir(), "dsh-tool-manager-"));
+    const path = join(root, "tool-manager.json");
+    try {
+      const store = new ToolManagerConfigStore(path);
+      await store.replace({ presets: { standard: { disabled: ["read"], groups: [] } } }, 0);
+
+      const stored = await store.updateGeneration({ provider: "magpie", model: "flash", reasoningEffort: "low" });
+      assert.deepEqual(stored.generation, { provider: "magpie", model: "flash", reasoningEffort: "low" });
+      assert.equal(store.revision, 2);
+      // The policies a page is drafting are untouched by this write.
+      assert.deepEqual(stored.presets, { standard: { disabled: ["read"], groups: [] } });
+      assert.deepEqual(JSON.parse(await readFile(path, "utf8")).generation, stored.generation);
+
+      // An effort chosen without pinning a route survives on its own.
+      const effortOnly = await store.updateGeneration({ reasoningEffort: "low" });
+      assert.deepEqual(effortOnly.generation, { reasoningEffort: "low" });
+
+      const cleared = await store.updateGeneration(undefined);
+      assert.equal("generation" in cleared, false);
+      assert.deepEqual(JSON.parse(await readFile(path, "utf8")), { presets: { standard: { disabled: ["read"], groups: [] } } });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });

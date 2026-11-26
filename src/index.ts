@@ -4,6 +4,8 @@ import type {
   AgentPresetsLike,
   AgentPresetsSource,
   ContextLike,
+  LlmModelReasoningInfoLike,
+  LlmProviderInfoLike,
   LlmRuntimeLike,
   ToolRuntimeLike,
   ToolSchemaLike,
@@ -11,7 +13,13 @@ import type {
 import { asRecord, resolvePresets, schemasForPreset } from "./dsh.js";
 import { CompositionWatch } from "./composition-watch.js";
 import { ToolManagerConfigStore } from "./config.js";
-import { groupPolicyIssues, matchesAnyPattern, normalizeSettings, policyFor } from "./policy.js";
+import {
+  groupPolicyIssues,
+  matchesAnyPattern,
+  normalizeGenerationSettings,
+  policyFor,
+  settingsForSave,
+} from "./policy.js";
 import { userNotices } from "./notices.js";
 import { ToolPolicyRuntime } from "./runtime.js";
 import { buildSnapshot, mergeSchemas } from "./snapshot.js";
@@ -20,6 +28,14 @@ import {
   MCP_FIND_TOOL_NAME,
   PTC_TRANSPORT_NAME,
   TOOL_MANAGER_PROBE_SESSION_ID,
+  type GenerationSettings,
+  type ModelCatalogEntryView,
+  type ModelCatalogFailureView,
+  type ModelCatalogGroupView,
+  type ModelCatalogView,
+  type ModelChoice,
+  type ModelReasoningView,
+  type ToolManagerSettings,
   type ToolManagerSnapshot,
 } from "./types.js";
 import {
@@ -27,6 +43,7 @@ import {
   generateGroupSuggestion,
   normalizeCustomPrompt,
   normalizeGroupNames,
+  resolveGenerationSelection,
   validateGenerationTimeout,
   selectSuggestionTools,
 } from "./suggest.js";
@@ -469,10 +486,61 @@ export function apply(ctx: unknown): void {
     };
 
     /** Build a snapshot from whatever services are live at this moment. */
-    const buildCurrentSnapshot = (): Promise<ToolManagerSnapshot> => {
+    const buildCurrentSnapshot = async (): Promise<ToolManagerSnapshot> => {
       const live = services();
       if (!live) throw new Error(SERVICE_RELOADING);
-      return buildSnapshot(live.presets, live.tools, config.get(), config.revision, config.path, catalog.schemasFor);
+      const snapshot = await buildSnapshot(
+        live.presets,
+        live.tools,
+        config.get(),
+        config.revision,
+        config.path,
+        catalog.schemasFor,
+      );
+      return { ...snapshot, ...generationView() };
+    };
+
+    /**
+     * The generation-model block the page renders beside the tool catalog.
+     *
+     * It belongs to no Preset, so it is projected here instead of inside
+     * `buildSnapshot`: the snapshot builder is handed no default-model service,
+     * and the page needs the default selection named to explain "跟随默认模型".
+     */
+    const generationView = (): Pick<ToolManagerSnapshot, "generation" | "defaultSelection"> => {
+      const stored = config.get().generation;
+      let defaultSelection: ModelChoice | undefined;
+      try {
+        const selection = context.get<AgentDefaultModelLike>("agentDefaultModel")?.currentSelection();
+        if (selection?.provider && selection.model) {
+          defaultSelection = {
+            provider: selection.provider,
+            model: selection.model,
+            ...(selection.reasoningEffort ? { reasoningEffort: selection.reasoningEffort } : {}),
+          };
+        }
+      } catch {
+        // A Host without a default-model service simply has nothing to name.
+        defaultSelection = undefined;
+      }
+      return {
+        ...(stored ? { generation: { ...stored } } : {}),
+        ...(defaultSelection ? { defaultSelection } : {}),
+      };
+    };
+
+    /**
+     * The generation model one request runs.
+     *
+     * The page sends its whole draft, so a model picked but not yet saved takes
+     * effect immediately; a body without the key (an older page) keeps whatever
+     * the config already stores instead of silently clearing it.
+     */
+    const generationChoiceOf = (body: Record<string, unknown> | undefined): GenerationSettings | undefined => {
+      if (body && Object.prototype.hasOwnProperty.call(body, "generation")) {
+        return normalizeGenerationSettings(body.generation);
+      }
+      return config.get().generation;
     };
 
     /**
@@ -522,6 +590,26 @@ export function apply(ctx: unknown): void {
 
     route({
       kind: "exact",
+      path: "/tool-manager/api/models",
+      handler: (req, res) => {
+        if (String(req.method ?? "GET").toUpperCase() !== "GET") {
+          sendJson(res, 405, { ok: false, message: "method not allowed" });
+          return;
+        }
+        const llm = context.get<LlmRuntimeLike>("llm");
+        if (!llm || typeof llm.listProviders !== "function" || typeof llm.listModels !== "function") {
+          sendJson(res, 503, { ok: false, message: "当前 DSH 不提供模型目录，无法列出可选模型。" });
+          return;
+        }
+        void readModelCatalog(llm).then(
+          (catalog) => sendJson(res, 200, catalog),
+          (error) => sendJson(res, 500, { ok: false, message: errorMessage(error) }),
+        );
+      },
+    });
+
+    route({
+      kind: "exact",
       path: "/tool-manager/api/suggest-group",
       handler: (req, res) => {
         if (String(req.method ?? "POST").toUpperCase() !== "POST") {
@@ -556,7 +644,14 @@ export function apply(ctx: unknown): void {
             : validateGenerationTimeout(body.timeoutMs);
           const prompt = normalizeCustomPrompt(body?.prompt);
           if (body?.prompt !== undefined && prompt === undefined) throw new Error("提示词不能为空");
-          return generateGroupSuggestion(llm, defaultModel, { tools: selected, otherGroupNames, prompt }, timeoutMs);
+          const resolved = await resolveGenerationSelection(llm, defaultModel, generationChoiceOf(body));
+          const suggestion = await generateGroupSuggestion(llm, defaultModel, {
+            tools: selected,
+            otherGroupNames,
+            prompt,
+            selection: resolved.selection,
+          }, timeoutMs);
+          return resolved.notice ? { ...suggestion, modelNotice: resolved.notice } : suggestion;
         })().then(
           (suggestion) => sendJson(res, 200, suggestion),
           (error) => sendJson(res, 400, { ok: false, message: errorMessage(error) }),
@@ -600,7 +695,14 @@ export function apply(ctx: unknown): void {
             : validateGenerationTimeout(body.timeoutMs);
           const prompt = normalizeCustomPrompt(body?.prompt);
           if (body?.prompt !== undefined && prompt === undefined) throw new Error("提示词不能为空");
-          return generateAutoGroups(llm, defaultModel, { tools: selected, otherGroupNames, prompt }, timeoutMs);
+          const resolved = await resolveGenerationSelection(llm, defaultModel, generationChoiceOf(body));
+          const result = await generateAutoGroups(llm, defaultModel, {
+            tools: selected,
+            otherGroupNames,
+            prompt,
+            selection: resolved.selection,
+          }, timeoutMs);
+          return resolved.notice ? { ...result, modelNotice: resolved.notice } : result;
         })().then(
           (result) => sendJson(res, 200, result),
           (error) => sendJson(res, 400, { ok: false, message: errorMessage(error) }),
@@ -655,7 +757,10 @@ export function apply(ctx: unknown): void {
           const expectedRevision = body && typeof body.expectedRevision === "number"
             ? body.expectedRevision
             : undefined;
-          const next = normalizeSettings(body?.settings);
+          // The page's own `generation` key decides that setting: an explicit
+          // null follows the default model again, while a page loaded before the
+          // setting existed omits it and keeps the stored choice (see policy.ts).
+          const next = settingsForSave(body?.settings, config.get());
           // Save validation must read the same catalog the page rendered. A
           // standing-only read misses every tool a plugin registers into each
           // Agent's own scope — `dsh-schedule` attaches `schedule_*` to every
@@ -677,6 +782,32 @@ export function apply(ctx: unknown): void {
           return buildCurrentSnapshot();
         })().then(
           (snapshot) => sendJson(res, 200, snapshot),
+          (error) => sendJson(res, 400, { ok: false, message: errorMessage(error) }),
+        );
+      },
+    });
+
+    route({
+      kind: "exact",
+      path: "/tool-manager/api/generation",
+      handler: (req, res) => {
+        if (String(req.method ?? "POST").toUpperCase() !== "POST") {
+          sendJson(res, 405, { ok: false, message: "method not allowed" });
+          return;
+        }
+        void (async () => {
+          const live = services();
+          if (!live) throw new Error(SERVICE_RELOADING);
+          const body = asRecord(await readJsonBody(req));
+          // Written on change, so it carries no expectedRevision: it never touches
+          // the Preset policies a page may be drafting, and the config store
+          // serializes it with the next 「保存」. The runtime only reads policies,
+          // so it needs no update here.
+          const generation = normalizeGenerationSettings(body?.generation);
+          const settings = await config.updateGeneration(generation);
+          return { revision: config.revision, generation: settings.generation };
+        })().then(
+          (result) => sendJson(res, 200, result),
           (error) => sendJson(res, 400, { ok: false, message: errorMessage(error) }),
         );
       },
@@ -750,7 +881,7 @@ export async function visiblePresetToolNames(
 export async function assertNoEmptyGroups(
   presets: AgentPresetsLike,
   tools: ToolRuntimeLike,
-  settings: ReturnType<typeof normalizeSettings>,
+  settings: ToolManagerSettings,
   /** Composes the session default before this call mounts any other preset. */
   composeDefaultFirst?: () => Promise<void>,
   /**
@@ -802,6 +933,73 @@ export async function assertNoEmptyGroups(
 }
 
 
+
+/**
+ * The models the settings page may offer for AI generation.
+ *
+ * Same projection DSH's own model selector uses: every registered route, the
+ * models it advertises, and each model's own reasoning efforts. A route whose
+ * catalog cannot be read is reported as a failure instead of being dropped, and
+ * a model whose exact metadata cannot be resolved keeps its name without
+ * efforts — a provider outage must not empty the whole picker.
+ * @param llm - the live `llm` service.
+ * @returns provider groups in registration order, plus per-provider failures.
+ */
+export async function readModelCatalog(llm: LlmRuntimeLike): Promise<ModelCatalogView> {
+  const groups: ModelCatalogGroupView[] = [];
+  const failures: ModelCatalogFailureView[] = [];
+  let providers: readonly LlmProviderInfoLike[] = [];
+  if (typeof llm.listProviders === "function") {
+    try {
+      providers = llm.listProviders();
+    } catch {
+      providers = [];
+    }
+  }
+  for (const provider of providers) {
+    const name = provider.name || provider.id;
+    try {
+      const models = await llm.listModels?.(provider.id) ?? [];
+      const entries: ModelCatalogEntryView[] = await Promise.all(models.map(async (model) => {
+        const reasoning = await reasoningView(llm, provider.id, model.id);
+        return {
+          id: model.id,
+          name: model.name || model.id,
+          ...(model.description ? { description: model.description } : {}),
+          ...(reasoning ? { reasoning } : {}),
+        };
+      }));
+      if (entries.length > 0) groups.push({ id: provider.id, name, models: entries });
+    } catch (error) {
+      failures.push({ id: provider.id, name, message: errorMessage(error) });
+    }
+  }
+  return { groups, failures };
+}
+
+/** The efforts one exact route accepts, or `undefined` when it declares none. */
+async function reasoningView(
+  llm: LlmRuntimeLike,
+  provider: string,
+  model: string,
+): Promise<ModelReasoningView | undefined> {
+  if (typeof llm.resolveModelInfo !== "function") return undefined;
+  let reasoning: LlmModelReasoningInfoLike | undefined;
+  try {
+    reasoning = (await llm.resolveModelInfo(provider, model))?.reasoning;
+  } catch {
+    return undefined;
+  }
+  if (!reasoning || reasoning.efforts.length === 0) return undefined;
+  return {
+    efforts: reasoning.efforts.map((effort) => ({
+      id: effort.id,
+      name: effort.name || effort.id,
+      ...(effort.description ? { description: effort.description } : {}),
+    })),
+    ...(reasoning.defaultEffort ? { defaultEffort: reasoning.defaultEffort } : {}),
+  };
+}
 
 function nextEventLoopTurn(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));

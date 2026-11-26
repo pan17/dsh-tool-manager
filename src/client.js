@@ -14,6 +14,7 @@ window.__ModuleLoader__.load({
 			".tm_head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}",
 			".tm_head h2{font-size:18px;margin:0 0 5px}.tm_muted{color:var(--dsw-alias-label-secondary,#9097a4);font-size:12px;line-height:1.5}",
 			".tm_preset_picker{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.tm_preset_picker label{font-size:12px;color:var(--dsw-alias-label-secondary,#9097a4)}.tm_select_wrap{position:relative;display:inline-flex;max-width:100%}.tm_select_wrap:after{content:'';position:absolute;right:12px;top:50%;width:7px;height:7px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:translateY(-70%) rotate(45deg);pointer-events:none;opacity:.9}.tm_preset_select,.tm_btn{appearance:none;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));border-radius:8px;background:var(--dsw-alias-bg-layer-1,rgba(128,128,128,.08));color:inherit;padding:7px 10px;font:inherit;font-size:12px}.tm_preset_select{min-width:min(360px,100%);cursor:pointer;padding-right:34px}.tm_preset_select option{background:var(--dsw-alias-bg-base,#17191d);color:inherit}.tm_btn{cursor:pointer}.tm_btn.primary{background:#5367e8;border-color:#5367e8;color:#fff}.tm_btn:disabled{opacity:.5;cursor:not-allowed}",
+			".tm_model_block{display:flex;flex-direction:column;gap:6px;min-width:0}.tm_model_row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}.tm_model_row .tm_model_label{flex:0 0 auto;font-size:12px;color:var(--dsw-alias-label-secondary,#9097a4);cursor:help;white-space:nowrap}.tm_model_row .tm_select_wrap{min-width:0}.tm_model_row .tm_model_pick{flex:1 1 auto}.tm_model_row .tm_preset_select{min-width:0;width:100%}.tm_model_row .tm_effort_pick{flex:0 0 auto}.tm_model_row .tm_effort_pick .tm_preset_select{width:auto;min-width:96px}.tm_model_hints{display:flex;align-items:center;gap:8px;flex-wrap:wrap}",
 			".tm_panel{border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.24));border-radius:12px;background:var(--dsw-alias-bg-layer-1,rgba(128,128,128,.06));overflow:hidden}",
 			".tm_panel_head{padding:13px 14px;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.2));display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;position:relative}.tm_panel_head b{font-size:14px}",
 			".tm_tools{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:0}.tm_tool{display:flex;gap:10px;align-items:flex-start;padding:11px 14px;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.13))}.tm_tool_name{font:600 12px ui-monospace,SFMono-Regular,Consolas,monospace}.tm_tool_desc{font-size:11px;color:var(--dsw-alias-label-secondary,#9097a4);line-height:1.4;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}",
@@ -98,7 +99,7 @@ window.__ModuleLoader__.load({
 			return payload;
 		}
 		/**
-		 * Project one Preset's whole policy onto another Preset.
+		 * Copy one Preset's on-demand groups and disabled names onto another.
 		 *
 		 * The target is meant to be overwritten, so its current groups and
 		 * disabled names are ignored. Copy only what the target can actually
@@ -106,6 +107,12 @@ window.__ModuleLoader__.load({
 		 * Presets, and a group whose members all disappear is skipped instead
 		 * of becoming an invalid empty group. Old wildcard patterns are
 		 * expanded to exact names, matching what the group editor shows.
+		 *
+		 * Loading mode is not part of the copy: it says how a Preset reads the
+		 * groups it owns (tool_list in default mode, tool_find in mcp mode), so
+		 * it belongs to the target. Rebuilding the policy used to omit `mode`,
+		 * which silently turned an MCP 按需 target back into default mode after
+		 * a copy.
 		 */
 		function copyPresetPolicy(sourcePreset, targetPreset) {
 			const sourceTools = sourcePreset.tools || [];
@@ -134,12 +141,139 @@ window.__ModuleLoader__.load({
 					patterns: members,
 				});
 			}
-			return { disabled, groups, skippedGroups };
+			const mode = targetPreset.policy && targetPreset.policy.mode === "mcp" ? "mcp" : undefined;
+			return { disabled, groups, ...(mode ? { mode } : {}), skippedGroups };
+		}
+		/**
+		 * The empty policy a Preset resets to.
+		 *
+		 * Loading mode survives a reset for the same reason it survives a copy:
+		 * it is a Preset-level choice, not one of the groups being cleared.
+		 * Dropping it flipped an MCP 按需 Preset back to default mode and
+		 * re-registered the discovery tool the Preset had switched away from.
+		 */
+		function resetPresetPolicy(policy) {
+			const mode = policy && policy.mode === "mcp" ? "mcp" : undefined;
+			return { disabled: [], groups: [], ...(mode ? { mode } : {}) };
 		}
 		function settingsPayload(value) {
 			const settings = { presets: {} };
 			for (const item of value && value.presets || []) settings.presets[item.id] = policyPayload(item.policy);
+			// `null` is an explicit "follow the default model again". A MISSING key
+			// is what a page loaded before this setting existed sends, and the Host
+			// reads that as "leave the stored choice alone".
+			settings.generation = generationPayload(value);
 			return settings;
+		}
+		/**
+		 * The shared AI generation model, normalized for persistence.
+		 *
+		 * Auto-naming and auto-grouping only classify tools and print JSON, so both
+		 * may run a fast model instead of a slow default one. A pinned route is
+		 * stored as `{provider, model}`; an effort chosen while still running the
+		 * default model is stored on its own, so the plugin keeps picking whatever
+		 * the deployment default is and only overrides its reasoning effort.
+		 */
+		function generationPayload(value) {
+			const choice = value && value.generation;
+			if (!choice || typeof choice !== "object") return null;
+			const provider = typeof choice.provider === "string" ? choice.provider.trim() : "";
+			const model = typeof choice.model === "string" ? choice.model.trim() : "";
+			const reasoningEffort = typeof choice.reasoningEffort === "string" ? choice.reasoningEffort.trim() : "";
+			if (provider && model) return { provider, model, ...(reasoningEffort ? { reasoningEffort } : {}) };
+			if (reasoningEffort) return { reasoningEffort };
+			return null;
+		}
+		/**
+		 * The selection a generation request will run.
+		 *
+		 * A stored choice either pins a route or only overrides the effort of the
+		 * default model; both end up here as one concrete provider/model/effort,
+		 * which is what the picker shows and what the dialogs name.
+		 */
+		function effectiveGenerationModel(choice, fallback) {
+			const pinned = choice && choice.provider && choice.model ? choice : null;
+			const base = pinned || fallback;
+			if (!base || !base.provider || !base.model) return null;
+			const effort = pinned
+				? (choice.reasoningEffort || "")
+				: ((choice && choice.reasoningEffort) || (fallback && fallback.reasoningEffort) || "");
+			return { provider: base.provider, model: base.model, ...(effort ? { reasoningEffort: effort } : {}) };
+		}
+		/** Whether a selection is exactly the deployment default route. */
+		function isDefaultSelection(selection, fallback) {
+			return !!(selection && fallback && selection.provider === fallback.provider && selection.model === fallback.model);
+		}
+		/**
+		 * The level a switched-to model should run, given the one in use before.
+		 *
+		 * Dropping the level whenever the new model does not declare it is what made
+		 * switching models silently fall back to the deployment default's own level
+		 * (Max here), which is the slowest possible outcome for a run the reader had
+		 * just set to Off. The declared levels are ordered least to greatest, so the
+		 * same relative position is carried over: Off on a four-step model lands on
+		 * the cheapest step of a three-step one, Max still lands on Max.
+		 */
+		function carryReasoningEffort(previous, previousEfforts, nextEfforts, nextDefault) {
+			if (!previous) return "";
+			const ids = (list) => (list || []).map((effort) => effort.id);
+			const next = ids(nextEfforts);
+			if (next.length === 0) return "";
+			if (next.includes(previous)) return previous;
+			if (nextDefault && next.includes(nextDefault)) return nextDefault;
+			const from = ids(previousEfforts);
+			const index = from.indexOf(previous);
+			if (index < 0 || from.length < 2) return next[0];
+			const position = Math.round((index / (from.length - 1)) * (next.length - 1));
+			return next[Math.min(Math.max(position, 0), next.length - 1)];
+		}
+		/** One model picker value: JSON so provider/model ids may contain anything. */
+		function generationModelValue(choice) {
+			if (!choice || !choice.provider || !choice.model) return "";
+			return JSON.stringify([choice.provider, choice.model]);
+		}
+		/** Read a model picker value back; `""` means "follow the default model". */
+		function parseGenerationModelValue(value) {
+			if (typeof value !== "string" || !value) return null;
+			let parsed;
+			try {
+				parsed = JSON.parse(value);
+			} catch {
+				return null;
+			}
+			if (!Array.isArray(parsed) || parsed.length !== 2) return null;
+			const [provider, model] = parsed;
+			if (typeof provider !== "string" || typeof model !== "string" || !provider || !model) return null;
+			return { provider, model };
+		}
+		/**
+		 * Which model a generation request will run, named for the reader.
+		 *
+		 * The dialogs used to say "当前默认模型" unconditionally, which became wrong
+		 * as soon as the generation model could be set separately. The name and the
+		 * level come from the catalog when it lists them, so the sentence and the
+		 * picker read the same: the sentence prints a level exactly when the picker
+		 * has one selected.
+		 */
+		function generationTargetLabel(choice, fallback, catalog) {
+			const effective = effectiveGenerationModel(choice, fallback);
+			if (!effective) return "未配置的模型";
+			const entry = findModelEntry(catalog, effective);
+			const name = entry && entry.name ? entry.name : effective.provider + "/" + effective.model;
+			const chosen = effective.reasoningEffort || "";
+			const effort = chosen
+				? ((entry && entry.reasoning ? (entry.reasoning.efforts || []).find((item) => item.id === chosen) : null) || { name: chosen })
+				: null;
+			return "「" + name + (effort ? " · 推理 " + effort.name : "") + "」";
+		}
+		/** The catalog entry for a choice, or null when the catalog does not list it. */
+		function findModelEntry(catalog, choice) {
+			if (!catalog || !choice) return null;
+			for (const group of catalog.groups || []) {
+				if (group.id !== choice.provider) continue;
+				return (group.models || []).find((model) => model.id === choice.model) || null;
+			}
+			return null;
 		}
 		function settingsSignature(value) {
 			return JSON.stringify(settingsPayload(value));
@@ -469,6 +603,20 @@ window.__ModuleLoader__.load({
 		const GROUP_CHIP_TITLE = "组内工具平时不声明；模型用 tool_list({ group }) 打开一组后，这组工具才进入工具表。";
 		const MCP_CHIP_TITLE = "组内工具始终不进工具表；模型用 tool_find({ group }) 看整组参数，随时能按名字直接调用。";
 
+		// The generation model is a global choice, not a Preset one: auto-naming
+		// and auto-grouping classify tools and print JSON, so a fast model is
+		// usually enough even when the conversation runs a slow reasoning one.
+		// It is offered inside both dialogs that spend a request — 「自动分组」
+		// and the group editor's 「自动生成名称和描述」.
+		const GENERATION_MODEL_HELP = [
+			"「自动分组」和「手动分组」里生成名称、描述时共用的模型，对所有 Preset 生效。",
+			"",
+			"默认就是 DSH 当前的默认模型及其推理强度；也可以换成任意已注册的 Provider + 模型，并单独选推理强度，「模型默认」表示不额外指定。",
+			"",
+			"所选模型已不可用（被删除或未配置）时，生成会回退到默认模型并明确提示，不会静默失败。",
+			"改动立即写入配置文件，不需要再点「保存」。",
+		].join("\n");
+
 		function ToolManagerSection() {
 			const [snapshot, setSnapshot] = react.useState(null);
 			const [draft, setDraft] = react.useState(null);
@@ -487,6 +635,10 @@ window.__ModuleLoader__.load({
 			const [aiConfirm, setAiConfirm] = react.useState(null);
 			const [suggestionTimeoutSeconds, setSuggestionTimeoutSeconds] = react.useState("60");
 			const [autoGroupTimeoutSeconds, setAutoGroupTimeoutSeconds] = react.useState("120");
+			const [models, setModels] = react.useState(null);
+			const [modelsError, setModelsError] = react.useState("");
+			const [generationSaveError, setGenerationSaveError] = react.useState("");
+			const [aiNotice, setAiNotice] = react.useState("");
 
 			const load = react.useCallback((attempt) => {
 				const tries = attempt || 0;
@@ -507,6 +659,15 @@ window.__ModuleLoader__.load({
 				}).finally(() => setBusy(false));
 			}, []);
 			react.useEffect(() => { load(); }, [load]);
+			// The picker is the only consumer of the model catalog, so a failure
+			// here leaves "跟随默认模型" usable instead of blocking the whole page.
+			react.useEffect(() => {
+				let live = true;
+				api("/models")
+					.then((value) => { if (live) { setModels(value); setModelsError(""); } })
+					.catch((e) => { if (live) setModelsError(String(e.message || e)); });
+				return () => { live = false; };
+			}, []);
 			const dirty = !!(snapshot && draft && settingsSignature(snapshot) !== settingsSignature(draft));
 			react.useEffect(() => {
 				if (!dirty) return undefined;
@@ -563,6 +724,103 @@ window.__ModuleLoader__.load({
 				});
 			}
 
+			/**
+			 * Choose the shared generation model, or `null` to let the plugin pick.
+			 *
+			 * The choice is persisted right away — this setting belongs to no
+			 * Preset, so waiting for 「保存」 would only ask the reader to save a page
+			 * they did not change. The draft still moves first, so the picker and the
+			 * next request see the choice even while the write is in flight.
+			 */
+			function setGenerationChoice(choice) {
+				setDraft((current) => {
+					if (!current) return current;
+					const next = clone(current);
+					if (choice) next.generation = { ...choice };
+					else delete next.generation;
+					return next;
+				});
+				setMessage("");
+				setAiNotice("");
+				persistGeneration(choice);
+			}
+
+			/**
+			 * Write the generation model to the config file.
+			 *
+			 * It goes through its own route instead of the page save so it needs no
+			 * page revision: the Preset policies a page may be drafting are untouched,
+			 * and the store serializes this write with the next 「保存」.
+			 */
+			function persistGeneration(choice) {
+				setGenerationSaveError("");
+				api("/generation", {
+					method: "POST",
+					body: JSON.stringify({ generation: generationPayload({ generation: choice }) }),
+				}).then((result) => {
+					if (!result) return;
+					// The Host answered with the revision it ended up at. Adopt it so the
+					// next 「保存」 sends a revision the store still accepts; take the
+					// larger one when two writes of ours raced.
+					setSnapshot((current) => {
+						if (!current) return current;
+						const next = { ...current, revision: Math.max(current.revision || 0, result.revision || 0) };
+						if (result.generation) next.generation = { ...result.generation };
+						else delete next.generation;
+						return next;
+					});
+					setGenerationSaveError("");
+				}).catch((error) => {
+					setGenerationSaveError(String(error.message || error));
+				});
+			}
+
+			/**
+			 * Pick a model for both generation tasks.
+			 *
+			 * The chosen level travels with the switch whenever the new model can
+			 * express it, because it describes how hard the classification should
+			 * think, not which route runs it. Choosing the deployment default route
+			 * stores no route at all: that keeps the plugin on whatever the default
+			 * model becomes. Any other route is persisted.
+			 */
+			function chooseGenerationModel(value) {
+				const picked = parseGenerationModelValue(value);
+				if (!picked) return;
+				const entry = findModelEntry(models, picked);
+				const targetEfforts = entry && entry.reasoning ? entry.reasoning.efforts || [] : [];
+				const keep = carryReasoningEffort(
+					generationEffortValue,
+					generationEntry && generationEntry.reasoning ? generationEntry.reasoning.efforts || [] : [],
+					targetEfforts,
+					entry && entry.reasoning ? entry.reasoning.defaultEffort : undefined,
+				);
+				setGenerationChoice(isDefaultSelection(picked, defaultSelection)
+					? (keep ? { reasoningEffort: keep } : null)
+					: { provider: picked.provider, model: picked.model, ...(keep ? { reasoningEffort: keep } : {}) });
+			}
+
+			/**
+			 * Pick the reasoning level of whichever model the picker currently shows.
+			 *
+			 * The level is stored even while the model stays the default one, so the
+			 * picker never has to be locked just because the route was not pinned.
+			 * "默认" stores nothing, which keeps following whatever level the model
+			 * or the deployment default already uses.
+			 */
+			function chooseGenerationEffort(reasoningEffort) {
+				if (!generationModel) return;
+				if (!isDefaultSelection(generationModel, defaultSelection)) {
+					setGenerationChoice({
+						provider: generationModel.provider,
+						model: generationModel.model,
+						...(reasoningEffort ? { reasoningEffort } : {}),
+					});
+					return;
+				}
+				setGenerationChoice(reasoningEffort ? { reasoningEffort } : null);
+			}
+
 			function openCreate() {
 				setModal({
 					mode: "create",
@@ -578,9 +836,9 @@ window.__ModuleLoader__.load({
 
 			function resetPresetConfig() {
 				if (!hasPresetConfig) return;
-				if (!window.confirm("确定重置当前 Preset 的配置吗？这会清空它的全部按需组和已关闭工具；只修改页面草稿，保存后生效。")) return;
+				if (!window.confirm("确定重置当前 Preset 的配置吗？这会清空它的全部按需组和已关闭工具，加载模式保持不变；只修改页面草稿，保存后生效。")) return;
 				mutatePreset((target) => {
-					target.policy = { disabled: [], groups: [] };
+					target.policy = resetPresetPolicy(target.policy);
 				});
 				setQuery("");
 				setFilter("all");
@@ -620,7 +878,7 @@ window.__ModuleLoader__.load({
 					if (target.id === source.id || !selected.has(target.id) || target.broken) continue;
 					const copied = copyPresetPolicy(source, target);
 					const before = JSON.stringify(policyPayload(target.policy));
-					const after = JSON.stringify(policyPayload({ disabled: copied.disabled, groups: copied.groups }));
+					const after = JSON.stringify(policyPayload(copied));
 					plans.push({ targetId: target.id, label: target.name || target.id, copied, changed: before !== after });
 				}
 				if (!plans.length) { setCopyDialog(null); return; }
@@ -632,6 +890,7 @@ window.__ModuleLoader__.load({
 						target.policy = {
 							disabled: [...plan.copied.disabled],
 							groups: plan.copied.groups.map((group) => ({ ...group, _key: newKey() })),
+							...(plan.copied.mode ? { mode: plan.copied.mode } : {}),
 						};
 					}
 					return next;
@@ -701,7 +960,6 @@ window.__ModuleLoader__.load({
 				setAiConfirm({
 					kind: "suggest",
 					title: "确认自动生成名称和描述",
-					message: "将所选工具的名称和描述发送给当前默认模型，并产生一次模型请求。",
 					timeoutSeconds: suggestionTimeoutSeconds,
 					prompt: initialPrompt,
 					promptCustom: false,
@@ -709,13 +967,16 @@ window.__ModuleLoader__.load({
 					error: "",
 					run: (timeoutMs, _tools, prompt) => {
 						setSuggestionTimeoutSeconds(String(timeoutMs / 1000));
-						patchModal({ generating: true, generateError: "" });
+						setAiNotice("");
+						patchModal({ generating: true, generateError: "", generateNotice: "" });
 						api("/suggest-group", {
 							method: "POST",
-							body: JSON.stringify({ presetId: preset.id, toolNames, otherGroupNames, timeoutMs, prompt }),
+							body: JSON.stringify({ presetId: preset.id, toolNames, otherGroupNames, timeoutMs, prompt, generation: generationPayload(draft) }),
 						}).then((suggestion) => {
+							const notice = suggestion.modelNotice ? String(suggestion.modelNotice) : "";
+							if (notice) setAiNotice(notice);
 							setModal((current) => current && current.key === key
-								? { ...current, name: suggestion.name || current.name, description: suggestion.description || current.description, generating: false, generateError: "" }
+								? { ...current, name: suggestion.name || current.name, description: suggestion.description || current.description, generating: false, generateError: "", generateNotice: notice }
 								: current);
 						}).catch((e) => {
 							setModal((current) => current && current.key === key
@@ -772,7 +1033,6 @@ window.__ModuleLoader__.load({
 				setAiConfirm({
 					kind: "auto-group",
 					title: "确认自动分组",
-					message: "筛选并勾选需要分组的工具，发送给当前默认模型进行聚类。",
 					timeoutSeconds: autoGroupTimeoutSeconds,
 					query: "",
 					selected: allCandidateNames,
@@ -782,13 +1042,15 @@ window.__ModuleLoader__.load({
 					error: "",
 					run: (timeoutMs, selectedToolNames, prompt) => {
 						setAutoGroupTimeoutSeconds(String(timeoutMs / 1000));
-						setAutoGrouping(true); setAutoGroupError(""); setAutoPreview(null);
+						setAutoGrouping(true); setAutoGroupError(""); setAutoPreview(null); setAiNotice("");
 						const signature = autoGroupSignature(selectedToolNames, otherGroupNames);
 						api("/auto-group", {
 							method: "POST",
-							body: JSON.stringify({ presetId: preset.id, toolNames: selectedToolNames, otherGroupNames, timeoutMs, prompt }),
+							body: JSON.stringify({ presetId: preset.id, toolNames: selectedToolNames, otherGroupNames, timeoutMs, prompt, generation: generationPayload(draft) }),
 						}).then((result) => {
-							setAutoPreview({ presetId: preset.id, signature, selectedTools: selectedToolNames, groups: result.groups || [], ungrouped: result.ungrouped || [] });
+							const notice = result.modelNotice ? String(result.modelNotice) : "";
+							if (notice) setAiNotice(notice);
+							setAutoPreview({ presetId: preset.id, signature, selectedTools: selectedToolNames, groups: result.groups || [], ungrouped: result.ungrouped || [], notice });
 						}).catch((e) => setAutoGroupError(String(e.message || e))).finally(() => setAutoGrouping(false));
 					},
 				});
@@ -882,7 +1144,7 @@ window.__ModuleLoader__.load({
 				api("/save", { method: "POST", body: JSON.stringify({ expectedRevision: snapshot.revision, settings }) })
 					.then((value) => {
 						const next = withGroupKeys(value);
-						setSnapshot(value); setDraft(next); setModal(null); setCopyDialog(null);
+						setSnapshot(value); setDraft(next); setModal(null); setCopyDialog(null); setAiNotice("");
 						setMessage("已保存；运行中 Agent 将从下一个模型步骤应用新策略。");
 					})
 					.catch((e) => setError(String(e.message || e)))
@@ -892,6 +1154,28 @@ window.__ModuleLoader__.load({
 			const disabled = new Set(preset.policy.disabled || []);
 			const grouped = groupedNames(preset);
 			const mcpMode = preset.policy.mode === "mcp";
+			const generationChoice = draft.generation || null;
+			const defaultSelection = draft.defaultSelection || null;
+			// What the next request will actually run: a pinned model, else the
+			// deployment default one. The picker always shows a concrete model, so
+			// there is no "follow the default" row to read.
+			const generationModel = effectiveGenerationModel(generationChoice, defaultSelection);
+			const generationEntry = findModelEntry(models, generationModel);
+			// A provider whose own catalog failed tells us nothing about its models,
+			// so only a readable catalog that simply lacks the model is proof.
+			const generationCatalogFailed = !!(models && generationModel
+				&& (models.failures || []).some((item) => item.id === generationModel.provider));
+			const generationUnavailable = !!(generationModel && models && !generationEntry && !generationCatalogFailed);
+			const generationEfforts = generationEntry && generationEntry.reasoning
+				? generationEntry.reasoning.efforts || []
+				: [];
+			// The dropdown shows the level in effect, so "默认" is only shown while no
+			// level is in effect at all. Following the deployment default model means
+			// running ITS level, so the select reads Max there rather than "默认".
+			const generationEffortValue = generationModel && generationModel.reasoningEffort
+				? generationModel.reasoningEffort
+				: "";
+			const generationLabel = generationTargetLabel(generationChoice, defaultSelection, models);
 			const saveBlocked = saveBlockReason({ busy, autoGrouping, writable: draft.writable, dirty });
 			const errorPreset = errorPresetId(error, (draft.presets || []).map((item) => item.id));
 			const autoGroupCandidates = (preset.tools || []).filter((tool) => !disabled.has(tool.name) && !grouped.has(tool.name));
@@ -1012,12 +1296,129 @@ window.__ModuleLoader__.load({
 				);
 			}
 
+			/**
+			 * The confirm text, derived at render time so it follows the picker.
+			 *
+			 * It used to be frozen when the dialog opened, which made the headline
+			 * lie as soon as the model was changed in the dialog it describes.
+			 */
+			function aiConfirmMessage() {
+				if (!aiConfirm) return "";
+				return aiConfirm.kind === "auto-group"
+					? "筛选并勾选需要分组的工具，发送给" + generationLabel + "进行聚类。"
+					: "将所选工具的名称和描述发送给" + generationLabel + "，并产生一次模型请求。";
+			}
+
+			/**
+			 * The shared generation model control, rendered inside a dialog.
+			 *
+			 * It belongs to whichever dialog is about to spend a model request —
+			 * 「自动分组」 and 「手动分组」 — so the reader can shrink the model right
+			 * where the cost is about to happen. Both dialogs edit one value. The
+			 * model and its reasoning effort share one line: the effort only matters
+			 * for the model next to it.
+			 */
+			function renderGenerationPicker() {
+				const pinned = !!(generationChoice && generationChoice.provider && generationChoice.model);
+				const listed = !!generationEntry;
+				// A reader recognises the provider's own display name, not a route, so
+				// the option text is just that name. The provider is appended only when
+				// two routes would read identically; the route itself is the tooltip.
+				const catalogGroups = models ? models.groups || [] : [];
+				const displayName = (model) => (model.name && model.name !== model.id ? model.name : model.id);
+				const nameCounts = new Map();
+				for (const group of catalogGroups) {
+					for (const model of group.models || []) {
+						const name = displayName(model);
+						nameCounts.set(name, (nameCounts.get(name) || 0) + 1);
+					}
+				}
+				const modelOptions = catalogGroups.map((group) => h("optgroup", {
+					key: group.id,
+					label: group.name || group.id,
+				}, (group.models || []).map((model) => {
+					const name = displayName(model);
+					const unique = nameCounts.get(name) === 1;
+					return h("option", {
+						key: model.id,
+						value: generationModelValue({ provider: group.id, model: model.id }),
+						title: group.id + "/" + model.id,
+					}, unique || !group.name ? name : name + " · " + group.name);
+				})));
+				// The effective model may not be in the catalog: the default route can
+				// be unlisted, a saved route can be gone, and the catalog can still be
+				// loading. Keep it selectable so the row never shows a wrong model.
+				const unlistedLabel = generationModel
+					? generationModel.provider + "/" + generationModel.model + (pinned ? "（当前不可用）" : "")
+					: "";
+				// An effort the catalog does not list for this route still has to be
+				// readable, otherwise the closed select would show a different level.
+				const undeclaredLevel = listed && generationEffortValue
+					&& !generationEfforts.some((effort) => effort.id === generationEffortValue)
+					? generationEffortValue
+					: "";
+				return h("div", { className: "tm_model_block", key: "generation" },
+					h("div", { className: "tm_model_row" },
+						h("span", { className: "tm_model_label", title: GENERATION_MODEL_HELP, key: "modelLabel" }, "生成模型"),
+						h("span", { className: "tm_select_wrap tm_model_pick", key: "modelPick" },
+							h("select", {
+								className: "tm_preset_select",
+								value: generationModelValue(generationModel),
+								disabled: busy || !generationModel,
+								title: "自动命名与自动分组共用的模型，默认是 DSH 当前的默认模型。选一个快速模型可以明显缩短生成时间。",
+								onChange: (event) => chooseGenerationModel(event.target.value),
+							},
+								!generationModel ? h("option", { value: "" }, "没有可用的默认模型") : null,
+								modelOptions,
+								generationModel && !listed ? h("option", { value: generationModelValue(generationModel) }, unlistedLabel) : null,
+							),
+						),
+						listed
+							? [
+								h("span", {
+									className: "tm_model_label",
+									key: "effortLabel",
+									title: "该模型的推理强度，这里显示的就是本次请求会发送的档位。",
+								}, "推理强度"),
+								h("span", { className: "tm_select_wrap tm_effort_pick", key: "effortPick" },
+									h("select", {
+										className: "tm_preset_select",
+										value: generationEffortValue,
+										disabled: busy || !generationModel,
+										title: "该模型的推理强度。「默认」表示不额外指定，用模型（或 DSH 默认模型）本来的档位。",
+										onChange: (event) => chooseGenerationEffort(event.target.value),
+									},
+										h("option", { value: "" }, "默认"),
+										generationEfforts.map((effort) => h("option", { key: effort.id, value: effort.id }, effort.name)),
+										undeclaredLevel ? h("option", { value: undeclaredLevel }, undeclaredLevel) : null,
+									),
+								),
+							]
+							: h("span", { className: "tm_muted", key: "effortMissing", title: "读不到这个模型的推理强度列表，暂时不能指定。" }, "读不到该模型的推理强度"),
+					),
+					generationSaveError ? h("div", { className: "tm_error" }, "保存失败：" + generationSaveError) : null,
+					generationUnavailable
+						? h("div", { className: "tm_model_hints" },
+							h("span", { className: "tm_badge off", title: "生成时会自动回退到默认模型，并提示原因" }, "该模型当前不可用"),
+							h("span", { className: "tm_muted" }, "生成时会改用默认模型，并提示原因。"),
+						)
+						: null,
+					modelsError
+						? h("div", { className: "tm_muted" }, "模型列表读取失败：" + modelsError)
+						: (models && (models.failures || []).length
+							? h("div", {
+								className: "tm_muted",
+								title: models.failures.map((item) => item.name + "：" + item.message).join("\n"),
+							}, "有 " + models.failures.length + " 个 Provider 的模型列表读取失败，未列出其模型。")
+							: null),
+				);
+			}
 			const aiConfirmDialog = aiConfirm && typeof document !== "undefined" ? reactDom.createPortal(
 				h("div", { className: "tm_modal", role: "dialog", "aria-modal": "true", "aria-label": aiConfirm.title },
 					h("div", { className: "tm_modal_mask", onMouseDown: () => setAiConfirm(null) }),
 					h("div", { className: "tm_modal_card" },
 						h("div", { className: "tm_modal_head" },
-							h("div", null, h("h3", null, aiConfirm.title), h("div", { className: "tm_muted" }, aiConfirm.message)),
+							h("div", null, h("h3", null, aiConfirm.title), h("div", { className: "tm_muted" }, aiConfirmMessage())),
 							h("button", { className: "tm_btn", onClick: () => setAiConfirm(null) }, "关闭"),
 						),
 						h("div", { className: "tm_modal_body" },
@@ -1042,7 +1443,7 @@ window.__ModuleLoader__.load({
 								),
 								aiSelected.size === 0
 									? h("div", { className: "tm_error", key: "status" }, "请至少勾选一个工具进行分组。")
-									: h("div", { className: "tm_muted", key: "status" }, "已勾选 " + aiSelected.size + " / " + aiCandidates.length + " 个候选工具。自动分组会调用当前默认模型，结果仍可手动修改。"),
+									: h("div", { className: "tm_muted", key: "status" }, "已勾选 " + aiSelected.size + " / " + aiCandidates.length + " 个候选工具。自动分组会调用" + generationLabel + "，结果仍可手动修改。"),
 								aiVisibleCandidates.length
 									? h("div", { className: "tm_picker", key: "picker" }, aiVisibleCandidates.map((tool) => h("label", { className: "tm_pick", key: tool.name },
 										h("input", {
@@ -1060,6 +1461,7 @@ window.__ModuleLoader__.load({
 										),
 									)))
 									: h("div", { className: "tm_muted", key: "empty", style: { padding: "12px" } }, aiCandidates.length ? "没有符合筛选的工具。" : "当前没有可分组的工具。"),
+								renderGenerationPicker(),
 							] : null,
 							h("div", {
 								style: {
@@ -1185,7 +1587,9 @@ window.__ModuleLoader__.load({
 								h("input", { className: "tm_input", value: modal.name, placeholder: "名称（模型用这个打开）", onChange: (e) => patchModal({ name: e.target.value, generateError: "" }) }),
 								h("button", { className: "tm_btn", disabled: modal.generating || modalMatchedTools.length === 0 || modalInvalidSelected.length > 0, onClick: generateGroupDetails }, modal.generating ? "生成中…" : "自动生成名称和描述"),
 							),
+							renderGenerationPicker(),
 							modal.generateError ? h("div", { className: "tm_error" }, modal.generateError) : null,
+							modal.generateNotice ? h("div", { className: "tm_notice" }, modal.generateNotice) : null,
 							h("textarea", { className: "tm_input", style: { width: "100%", minHeight: "72px", resize: "vertical" }, value: modal.description, placeholder: "描述（可选）", onChange: (e) => patchModal({ description: e.target.value, generateError: "" }) }),
 							h("div", { className: "tm_row" },
 								h("input", { className: "tm_input", value: modal.query, placeholder: "筛选工具名或描述", onChange: (e) => patchModal({ query: e.target.value }) }),
@@ -1195,7 +1599,7 @@ window.__ModuleLoader__.load({
 							modalInvalidSelected.length
 								? h("div", { className: "tm_error" }, "以下工具已关闭或属于其他分组，不能加入当前组：" + modalInvalidSelected.join(", ") + "。请取消选择。")
 								: h("div", { className: modalMatchedTools.length ? "tm_muted" : "tm_error" }, modalMatchedTools.length
-									? "已选 " + modalMatchedTools.length + " 个工具。自动生成会调用当前默认模型，结果仍可手动修改。"
+									? "已选 " + modalMatchedTools.length + " 个工具。自动生成会调用" + generationLabel + "，结果仍可手动修改。"
 									: "每个按需组至少需要一个未关闭且未被其他组占用的工具。"),
 							pickerTools.length
 								? h("div", { className: "tm_picker" }, pickerTools.map((tool) => h("label", { className: "tm_pick", key: tool.name },
@@ -1240,6 +1644,7 @@ window.__ModuleLoader__.load({
 								h("div", { className: "tm_panel_head" }, h("div", { className: "tm_preview_meta" }, h("b", null, group.name), h("div", { className: "tm_preview_desc" }, group.description)), h("span", { className: "tm_group_count" }, group.tools.length + " 个工具")),
 								h("div", { style: { padding: "10px 14px" } }, group.tools.map((name) => h("div", { className: "tm_member tm_tool_name", key: name }, name))),
 							)),
+							autoPreview.notice ? h("div", { className: "tm_notice" }, autoPreview.notice) : null,
 							autoPreview.ungrouped.length ? h("div", { className: "tm_notice" }, "保持常开、未归组：", h("span", { className: "tm_code" }, autoPreview.ungrouped.join(", "))) : null,
 						),
 						h("div", { className: "tm_modal_foot" },
@@ -1258,16 +1663,17 @@ window.__ModuleLoader__.load({
 						h("div", { className: "tm_modal_head" },
 							h("div", null,
 								h("h3", null, "复制当前 Preset 配置"),
-								h("div", { className: "tm_muted" }, "将当前 Preset 的全部按需组和已关闭工具复制到勾选的 Preset；只改页面草稿，保存后生效。"),
+								h("div", { className: "tm_muted" }, "将当前 Preset 的全部按需组和已关闭工具复制到勾选的 Preset；加载模式不跟随复制，各 Preset 保持自己的「默认 / MCP 按需」设置；只改页面草稿，保存后生效。"),
 							),
 							h("button", { className: "tm_btn", onClick: () => setCopyDialog(null) }, "关闭"),
 						),
 						h("div", { className: "tm_modal_body" },
 							h("div", { className: "tm_notice" },
-								"源 Preset「" + (copySource.name || copySource.id) + "」："
+								"源 Preset「" + (copySource.name || copySource.id) + "」（加载模式："
+								+ (copySource.policy.mode === "mcp" ? "MCP 按需" : "默认") + "）："
 								+ (copySource.policy.groups || []).length + " 个按需组、"
 								+ (copySource.policy.disabled || []).length + " 个已关闭工具。"
-								+ "勾选的目标 Preset 现有分组和关闭项将被整份覆盖。",
+								+ "勾选的目标 Preset 现有分组和关闭项将被整份覆盖，加载模式不变。",
 							),
 							h("div", { className: "tm_row" },
 								h("button", {
@@ -1282,6 +1688,7 @@ window.__ModuleLoader__.load({
 								? h("div", { className: "tm_picker" }, copyPreviewRows.map(({ target, preview }) => {
 									const currentGroups = (target.policy.groups || []).length;
 									const currentDisabled = (target.policy.disabled || []).length;
+									const targetMode = target.policy.mode === "mcp" ? "MCP 按需" : "默认";
 									const meta = target.broken
 										? "工具目录读取失败，暂不能复制"
 										: "现有 " + currentGroups + " 个组 / " + currentDisabled + " 个关闭项 → 将复制 "
@@ -1289,6 +1696,7 @@ window.__ModuleLoader__.load({
 											+ (preview.skippedGroups.length
 												? "；跳过 " + preview.skippedGroups.length + " 个组：" + preview.skippedGroups.join("、")
 												: "")
+											+ "；加载模式保持「" + targetMode + "」"
 											+ ((target.tools || []).length === 0 ? "；目标没有可见工具，复制后配置为空" : "");
 									return h("label", { className: "tm_pick", key: target.id },
 										h("input", {
@@ -1357,7 +1765,7 @@ window.__ModuleLoader__.load({
 							className: "tm_preset_select",
 							value: preset.id,
 							disabled: autoGrouping,
-							onChange: (event) => { setActive(event.target.value); setQuery(""); setFilter("all"); setModal(null); setAutoPreview(null); setCopyDialog(null); setAutoGroupError(""); setExpanded({}); },
+							onChange: (event) => { setActive(event.target.value); setQuery(""); setFilter("all"); setModal(null); setAutoPreview(null); setCopyDialog(null); setAutoGroupError(""); setAiNotice(""); setExpanded({}); },
 						}, draft.presets.map((item) => h("option", { key: item.id, value: item.id }, (item.name || item.id) + " · " + (item.tools || []).length + " 个工具" + (item.isDefault ? " · 默认" : "") + (item.trust === "user" ? " · 用户" : "") + (item.id === errorPreset ? " · 保存失败" : "")))),
 					),
 					preset.broken ? null
@@ -1372,20 +1780,21 @@ window.__ModuleLoader__.load({
 				),
 				preset.broken ? h("div", { className: "tm_error" }, preset.broken) : null,
 				autoGroupError ? h("div", { className: "tm_error" }, autoGroupError) : null,
+				aiNotice ? h("div", { className: "tm_notice" }, aiNotice) : null,
 				h("section", { className: "tm_panel" },
 					h("div", { className: "tm_panel_head" },
 						h("div", null,
 							h("b", null, "工具目录", h("span", { className: "tm_help", tabIndex: 0, "aria-label": "工具目录说明", "data-tip": toolCatalogHelp(mcpMode) }, "?")),
 						),
 						h("div", { className: "tm_row" },
-							h("button", { className: "tm_btn", onClick: startAutoGroup, disabled: autoGrouping || autoGroupCandidates.length === 0, title: autoGroupCandidates.length ? "用默认模型对未分组且未关闭的工具进行聚类" : "没有可自动分组的工具" }, autoGrouping ? "自动分组中…" : "自动分组"),
+							h("button", { className: "tm_btn", onClick: startAutoGroup, disabled: autoGrouping || autoGroupCandidates.length === 0, title: autoGroupCandidates.length ? "用" + generationLabel + "对未分组且未关闭的工具进行聚类" : "没有可自动分组的工具" }, autoGrouping ? "自动分组中…" : "自动分组"),
 							h("button", { className: "tm_btn", onClick: openCreate, disabled: autoGrouping }, "手动分组"),
 							h("button", {
 								className: "tm_btn",
 								onClick: resetPresetConfig,
 								disabled: autoGrouping || busy || !draft.writable || !hasPresetConfig,
 								title: hasPresetConfig
-									? "清空当前 Preset 的全部按需组和已关闭工具"
+									? "清空当前 Preset 的全部按需组和已关闭工具（加载模式保持不变）"
 									: "当前 Preset 没有可重置的配置",
 							}, "重置配置"),
 							h("button", {
@@ -1393,7 +1802,7 @@ window.__ModuleLoader__.load({
 								onClick: openCopyDialog,
 								disabled: autoGrouping || busy || !draft.writable || !hasPresetConfig || copyTargetCount === 0,
 								title: hasPresetConfig
-									? "把当前 Preset 的分组和已关闭工具复制到其他 Preset"
+									? "把当前 Preset 的分组和已关闭工具复制到其他 Preset（加载模式不复制）"
 									: "当前 Preset 没有可复制的分组或已关闭工具",
 							}, "复制配置"),
 						),
@@ -1458,6 +1867,19 @@ window.__ModuleLoader__.load({
 		// Pure policy projection, exported for unit tests. DSH only consumes
 		// apply/inject, so this does not widen the client plugin contract.
 		exports.copyPresetPolicy = copyPresetPolicy;
+		exports.resetPresetPolicy = resetPresetPolicy;
+		// Generation-model projections, exported for unit tests: the persisted
+		// payload, the picker's value codec, the effective selection the picker
+		// shows, and the label the dialogs print.
+		exports.settingsPayload = settingsPayload;
+		exports.generationPayload = generationPayload;
+		exports.effectiveGenerationModel = effectiveGenerationModel;
+		exports.isDefaultSelection = isDefaultSelection;
+		exports.carryReasoningEffort = carryReasoningEffort;
+		exports.generationModelValue = generationModelValue;
+		exports.parseGenerationModelValue = parseGenerationModelValue;
+		exports.generationTargetLabel = generationTargetLabel;
+		exports.findModelEntry = findModelEntry;
 		// Save-guard projections, exported for unit tests. The button's disabled
 		// state and the error banner both used to hide which Preset or which
 		// condition was involved; these make that answerable without a DOM.

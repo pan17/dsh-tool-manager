@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { normalizeSettings } from "./policy.js";
-import type { ToolManagerSettings } from "./types.js";
+import type { GenerationSettings, ToolManagerSettings } from "./types.js";
 
 export const CONFIG_FILE_NAME = "tool-manager.json";
 
@@ -51,6 +51,27 @@ export class ToolManagerConfigStore {
     };
     const pending = this.writeQueue.then(write, write);
     this.writeQueue = pending.catch(() => undefined);
+    return pending;
+  }
+
+  /**
+   * Persist only the shared generation model.
+   *
+   * The page writes this setting as soon as it changes, so the request carries
+   * no page revision: it never touches the Preset policies a page may be
+   * drafting, and it still queues behind the same write lock, so the next
+   * 「保存」 either lands before or after it and sees the same policies.
+   */
+  updateGeneration(generation: GenerationSettings | undefined): Promise<ToolManagerSettings> {
+    const write = async (): Promise<ToolManagerSettings> => {
+      const next = normalizeSettings({ ...this.value, generation });
+      await this.write(next);
+      this.value = next;
+      this.currentRevision += 1;
+      return next;
+    };
+    const pending = this.writeQueue.then(write, write);
+    this.writeQueue = pending.then(() => undefined, () => undefined);
     return pending;
   }
 

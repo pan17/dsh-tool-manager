@@ -54,6 +54,38 @@ export interface ModelSelectionLike {
   reasoningEffort?: string;
 }
 
+/** One registered provider route, as `llm.listProviders()` describes it. */
+export interface LlmProviderInfoLike {
+  id: string;
+  name: string;
+}
+
+/** One model a provider route advertises. */
+export interface LlmModelInfoLike {
+  provider: string;
+  id: string;
+  name: string;
+  description?: string;
+}
+
+/** One adapter-owned reasoning effort. */
+export interface LlmReasoningEffortInfoLike {
+  id: string;
+  name: string;
+  description?: string;
+}
+
+/** Selectable efforts for one exact provider/model route, least to greatest. */
+export interface LlmModelReasoningInfoLike {
+  efforts: readonly LlmReasoningEffortInfoLike[];
+  defaultEffort?: string;
+}
+
+/** Exact-route metadata, including the efforts that route actually accepts. */
+export interface LlmResolvedModelInfoLike extends LlmModelInfoLike {
+  reasoning?: LlmModelReasoningInfoLike;
+}
+
 export interface AgentDefaultModelLike {
   currentSelection(): ModelSelectionLike;
 }
@@ -78,6 +110,15 @@ export interface LlmRuntimeLike {
     maxTokens?: number;
     signal?: AbortSignal;
   }): AsyncIterable<StreamChunkLike>;
+  /**
+   * Registered provider routes. Absent on a Host that publishes no catalog, in
+   * which case a chosen generation model cannot be checked before it is used.
+   */
+  listProviders?(): readonly LlmProviderInfoLike[];
+  /** Models one route currently advertises; may reach the provider endpoint. */
+  listModels?(provider: string): Promise<readonly LlmModelInfoLike[]>;
+  /** Exact-route metadata, the only source of the efforts a route accepts. */
+  resolveModelInfo?(provider: string, model: string): Promise<LlmResolvedModelInfoLike>;
 }
 
 export interface PresetScopeLease {

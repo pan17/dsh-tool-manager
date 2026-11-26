@@ -25,8 +25,75 @@ export interface PresetToolPolicy {
   mode?: "groups" | "mcp";
 }
 
+/** One provider route, model id, and optional adapter-owned reasoning effort. */
+export interface ModelChoice {
+  provider: string;
+  model: string;
+  /** Adapter-owned effort; absent follows the model's own default. */
+  reasoningEffort?: string;
+}
+
+/**
+ * Model both AI generation tasks run instead of the deployment default.
+ *
+ * Auto-naming and auto-grouping only classify tools and print JSON, so a fast
+ * model is usually enough even when the default model is a slow reasoning one.
+ * `provider` + `model` pin an exact route; leaving both out keeps the plugin on
+ * whatever the deployment default model is, which is how a reasoning level can
+ * be chosen without pinning a model.
+ */
+export interface GenerationSettings {
+  provider?: string;
+  model?: string;
+  /** Adapter-owned effort; absent follows the model's own default. */
+  reasoningEffort?: string;
+}
+
 export interface ToolManagerSettings {
   presets: PresetPolicyMap;
+  /** Shared generation model; absent follows the deployment default model. */
+  generation?: GenerationSettings;
+}
+
+/** One adapter-owned reasoning effort offered to the settings page. */
+export interface ModelEffortView {
+  id: string;
+  name: string;
+  description?: string;
+}
+
+/** Selectable reasoning metadata for one exact provider/model route. */
+export interface ModelReasoningView {
+  efforts: ModelEffortView[];
+  defaultEffort?: string;
+}
+
+/** One model the settings page can offer as a generation model. */
+export interface ModelCatalogEntryView {
+  id: string;
+  name: string;
+  description?: string;
+  reasoning?: ModelReasoningView;
+}
+
+/** One provider route and the models it currently advertises. */
+export interface ModelCatalogGroupView {
+  id: string;
+  name: string;
+  models: ModelCatalogEntryView[];
+}
+
+/** One provider whose model catalog could not be read. */
+export interface ModelCatalogFailureView {
+  id: string;
+  name: string;
+  message: string;
+}
+
+/** Everything the settings page needs to offer a generation model. */
+export interface ModelCatalogView {
+  groups: ModelCatalogGroupView[];
+  failures: ModelCatalogFailureView[];
 }
 
 export interface ToolSchemaView {
@@ -104,6 +171,10 @@ export interface ToolManagerSnapshot {
   revision: number;
   configPath: string;
   presets: PresetCatalogView[];
+  /** Stored generation model; absent follows `defaultSelection`. */
+  generation?: GenerationSettings;
+  /** The deployment default model, named so the page can say what "follow" means. */
+  defaultSelection?: ModelChoice;
 }
 
 export type ToolListGroupView = {

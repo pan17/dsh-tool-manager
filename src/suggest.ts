@@ -5,6 +5,7 @@ import type {
   StreamChunkLike,
   ToolSchemaLike,
 } from "./dsh.js";
+import type { GenerationSettings } from "./types.js";
 
 export const DEFAULT_SUGGESTION_TIMEOUT_MS = 60_000;
 export const DEFAULT_AUTO_GROUP_TIMEOUT_MS = 120_000;
@@ -20,6 +21,11 @@ export interface GroupSuggestionRequest {
   tools: ToolSchemaLike[];
   otherGroupNames: string[];
   prompt?: string;
+  /**
+   * Already resolved provider/model for this request. Absent follows the
+   * deployment default model, which is the historical behaviour.
+   */
+  selection?: ModelSelectionLike;
 }
 
 export interface AutoGroupSuggestion extends GroupSuggestion {
@@ -35,6 +41,148 @@ export interface AutoGroupRequest {
   tools: ToolSchemaLike[];
   otherGroupNames: string[];
   prompt?: string;
+  /** Already resolved provider/model; absent follows the default model. */
+  selection?: ModelSelectionLike;
+}
+
+/**
+ * The catalog facts needed to tell whether a chosen generation model still
+ * exists. Every member is optional in practice: an older Host publishes fewer
+ * of them, and a check that cannot run must not fail the request.
+ */
+export interface GenerationModelCatalogLike {
+  listProviders?(): readonly { id: string }[];
+  listModels?(provider: string): Promise<readonly { id: string }[]>;
+  resolveModelInfo?(provider: string, model: string): Promise<{
+    reasoning?: { efforts: readonly { id: string }[]; defaultEffort?: string };
+  } | undefined>;
+}
+
+export interface ResolvedGenerationSelection {
+  /** The provider/model the request must run. */
+  selection: ModelSelectionLike;
+  /** Why the chosen model could not be used, when it could not. */
+  notice?: string;
+}
+
+/**
+ * Turn the stored generation override into the selection one request runs.
+ *
+ * The override is a speed optimization, so an override this Host can no longer
+ * serve must never turn into a failed request: the deployment default model is
+ * used instead and `notice` says why, which the page shows. A catalog that
+ * cannot answer (no service, unreadable provider) leaves the override alone —
+ * failing back there would silently ignore a perfectly good choice.
+ * @param catalog - the live `llm` service, when it publishes a catalog.
+ * @param defaultModel - the deployment default, read only when it is needed.
+ * @param choice - the stored override, or `undefined` to follow the default.
+ * @returns the selection to run, plus a notice when the override was dropped.
+ */
+export async function resolveGenerationSelection(
+  catalog: GenerationModelCatalogLike | undefined,
+  defaultModel: AgentDefaultModelLike,
+  choice: GenerationSettings | undefined,
+): Promise<ResolvedGenerationSelection> {
+  const provider = typeof choice?.provider === "string" ? choice.provider.trim() : "";
+  const model = typeof choice?.model === "string" ? choice.model.trim() : "";
+  const effort = typeof choice?.reasoningEffort === "string" ? choice.reasoningEffort.trim() : "";
+
+  if (!provider || !model) {
+    // No pinned route: the plugin runs the deployment default and may only
+    // override its effort, so the route checks below do not apply.
+    const base = validateSelection(defaultModel.currentSelection());
+    if (!effort) return { selection: base };
+    const selection: ModelSelectionLike = { ...base, reasoningEffort: effort };
+    if (!catalog || typeof catalog.listModels !== "function") return { selection };
+    return resolveEffort(catalog, selection);
+  }
+
+  const chosen: ModelSelectionLike = {
+    provider,
+    model,
+    ...(effort ? { reasoningEffort: effort } : {}),
+  };
+  const fallback = (reason: string): ResolvedGenerationSelection => {
+    const selection = defaultModel.currentSelection();
+    return {
+      selection,
+      notice: `所选生成模型「${chosen.provider}/${chosen.model}」${reason}`
+        + `已回退到默认模型「${selection.provider}/${selection.model}」。`,
+    };
+  };
+
+  if (!catalog || typeof catalog.listModels !== "function") return { selection: chosen };
+
+  const providers = readProviders(catalog);
+  if (providers && !providers.some((provider) => provider.id === chosen.provider)) {
+    return fallback("的 Provider 当前不可用（可能已被删除或未配置），");
+  }
+  let models: readonly { id: string }[];
+  try {
+    models = await catalog.listModels(chosen.provider);
+  } catch {
+    // The provider is registered but its catalog is unreadable right now; that
+    // is not evidence the model is gone.
+    return { selection: chosen };
+  }
+  if (!models.some((model) => model.id === chosen.model)) {
+    return fallback("当前不可用（可能已被删除或未配置），");
+  }
+
+  return resolveEffort(catalog, chosen);
+}
+
+function readProviders(catalog: GenerationModelCatalogLike): readonly { id: string }[] | undefined {
+  if (typeof catalog.listProviders !== "function") return undefined;
+  try {
+    return catalog.listProviders();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Keep only a reasoning effort the route actually accepts.
+ *
+ * The LLM service rejects a request that names an effort its model does not
+ * declare, so a stale stored effort would fail the whole request. Dropping the
+ * effort (or using the route's own default) keeps the chosen fast model useful.
+ */
+async function resolveEffort(
+  catalog: GenerationModelCatalogLike,
+  chosen: ModelSelectionLike,
+): Promise<ResolvedGenerationSelection> {
+  const requested = chosen.reasoningEffort;
+  if (!requested || typeof catalog.resolveModelInfo !== "function") return { selection: chosen };
+
+  let reasoning: { efforts: readonly { id: string }[]; defaultEffort?: string } | undefined;
+  try {
+    reasoning = (await catalog.resolveModelInfo(chosen.provider, chosen.model))?.reasoning;
+  } catch {
+    return { selection: chosen };
+  }
+  if (reasoning && reasoning.efforts.some((effort) => effort.id === requested)) {
+    return { selection: chosen };
+  }
+
+  const supported = reasoning ? reasoning.efforts : [];
+  const alternate = reasoning?.defaultEffort;
+  const replacement = alternate !== undefined && supported.some((effort) => effort.id === alternate)
+    ? alternate
+    : undefined;
+  // "生成模型", not "所选生成模型": the same replacement happens when the page
+  // only overrode the level of the deployment default model.
+  const label = `生成模型「${chosen.provider}/${chosen.model}」`;
+  return {
+    selection: {
+      provider: chosen.provider,
+      model: chosen.model,
+      ...(replacement ? { reasoningEffort: replacement } : {}),
+    },
+    notice: replacement
+      ? `${label}不支持推理强度「${requested}」，已改用该模型的默认强度「${replacement}」。`
+      : `${label}不支持推理强度「${requested}」，已改为不指定推理强度。`,
+  };
 }
 
 export async function generateGroupSuggestion(
@@ -47,7 +195,7 @@ export async function generateGroupSuggestion(
 
   const customPrompt = normalizeCustomPrompt(request.prompt);
   const prompt = customPrompt ?? buildSuggestionPrompt(request);
-  const selection = validateSelection(defaultModel.currentSelection());
+  const selection = validateSelection(request.selection ?? defaultModel.currentSelection());
   const effectiveTimeoutMs = validateGenerationTimeout(timeoutMs);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort("tool-manager group suggestion timed out"), effectiveTimeoutMs);
@@ -107,7 +255,7 @@ export async function generateAutoGroups(
   if (request.tools.length === 0) throw new Error("当前没有可自动分组的工具");
   const customPrompt = normalizeCustomPrompt(request.prompt);
   const prompt = customPrompt ?? buildAutoGroupPrompt(request);
-  const selection = validateSelection(defaultModel.currentSelection());
+  const selection = validateSelection(request.selection ?? defaultModel.currentSelection());
   const effectiveTimeoutMs = validateGenerationTimeout(timeoutMs);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort("tool-manager auto grouping timed out"), effectiveTimeoutMs);

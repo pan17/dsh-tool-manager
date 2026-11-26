@@ -96,6 +96,49 @@ describe("copyPresetPolicy", () => {
     ]);
   });
 
+  it("keeps the target preset in MCP mode", () => {
+    const source = preset("standard", ["alpha", "beta"], {
+      disabled: [],
+      groups: [{ name: "组", patterns: ["alpha"] }],
+    });
+    const target = preset("cordis", ["alpha", "beta"], { disabled: [], groups: [], mode: "mcp" });
+
+    assert.deepEqual(plain(client.copyPresetPolicy(source, target)), {
+      disabled: [],
+      groups: [{ name: "组", patterns: ["alpha"] }],
+      mode: "mcp",
+      skippedGroups: [],
+    });
+  });
+
+  it("does not move the source's MCP mode onto a default-mode target", () => {
+    const source = preset("cordis", ["alpha"], {
+      disabled: [],
+      groups: [{ name: "组", patterns: ["alpha"] }],
+      mode: "mcp",
+    });
+    const target = preset("standard", ["alpha"], {
+      disabled: [],
+      groups: [{ name: "旧组", patterns: ["alpha"] }],
+    });
+
+    const copied = plain(client.copyPresetPolicy(source, target));
+    assert.equal("mode" in copied, false);
+    assert.deepEqual(copied.groups, [{ name: "组", patterns: ["alpha"] }]);
+  });
+
+  it("keeps the target's mode when the source has no groups to copy", () => {
+    const source = preset("standard", ["alpha"], { disabled: [], groups: [] });
+    const target = preset("cordis", ["alpha"], { disabled: [], groups: [], mode: "mcp" });
+
+    assert.deepEqual(plain(client.copyPresetPolicy(source, target)), {
+      disabled: [],
+      groups: [],
+      mode: "mcp",
+      skippedGroups: [],
+    });
+  });
+
   it("produces a policy accepted by the save validator", async () => {
     const source = preset("standard", ["alpha", "beta", "gamma", "delta"], {
       disabled: ["delta"],
@@ -114,5 +157,32 @@ describe("copyPresetPolicy", () => {
       undefined,
       () => target.tools.map((tool) => tool.name),
     );
+  });
+});
+
+describe("resetPresetPolicy", () => {
+  it("clears groups and disabled names but keeps MCP mode", () => {
+    const policy = {
+      disabled: ["alpha"],
+      groups: [{ name: "组", description: "说明", patterns: ["beta"] }],
+      mode: "mcp",
+    };
+
+    assert.deepEqual(plain(client.resetPresetPolicy(policy)), {
+      disabled: [],
+      groups: [],
+      mode: "mcp",
+    });
+  });
+
+  it("returns a default-mode policy for a default-mode preset", () => {
+    assert.deepEqual(plain(client.resetPresetPolicy({ disabled: ["alpha"], groups: [] })), {
+      disabled: [],
+      groups: [],
+    });
+  });
+
+  it("tolerates a missing policy", () => {
+    assert.deepEqual(plain(client.resetPresetPolicy(undefined)), { disabled: [], groups: [] });
   });
 });

@@ -2,6 +2,7 @@ import {
   DISCOVERY_TOOL_NAME,
   MCP_FIND_TOOL_NAME,
   PTC_TRANSPORT_NAME,
+  type GenerationSettings,
   type PresetOrphans,
   type PresetToolPolicy,
   type ResolvedGroupView,
@@ -25,7 +26,56 @@ export function normalizeSettings(value: unknown): ToolManagerSettings {
     presets[presetId] = normalizePresetPolicy(rawPolicy);
   }
 
-  return { presets };
+  const generation = normalizeGenerationSettings(record?.generation);
+  return {
+    presets,
+    ...(generation === undefined ? {} : { generation }),
+  };
+}
+
+/**
+ * The settings one save writes.
+ *
+ * A page loaded before the generation setting existed sends only `presets`,
+ * and its missing key means "not edited" rather than "clear it": the stored
+ * choice is carried over. The current page always sends the key, using an
+ * explicit `null` to follow the default model again.
+ * @param value - the request's `settings` payload.
+ * @param current - what the config store holds right now.
+ * @returns the complete settings to persist.
+ */
+export function settingsForSave(value: unknown, current: ToolManagerSettings): ToolManagerSettings {
+  const record = asRecord(value);
+  const next = normalizeSettings(record);
+  if (!record || !Object.prototype.hasOwnProperty.call(record, "generation")) {
+    const stored = current.generation;
+    if (stored) next.generation = { ...stored };
+  }
+  return next;
+}
+
+/**
+ * The shared AI generation model, or `undefined` to let the plugin choose.
+ *
+ * A complete route (`provider` + `model`) pins both. Without one, only the
+ * reasoning effort survives: the plugin keeps running whatever the deployment
+ * default model is and just overrides how hard it thinks, which is exactly what
+ * picking a level in the page's model row does before a model is chosen.
+ */
+export function normalizeGenerationSettings(value: unknown): GenerationSettings | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const provider = typeof record.provider === "string" ? record.provider.trim() : "";
+  const model = typeof record.model === "string" ? record.model.trim() : "";
+  const reasoningEffort = typeof record.reasoningEffort === "string" ? record.reasoningEffort.trim() : "";
+  if (provider && model) {
+    return {
+      provider,
+      model,
+      ...(reasoningEffort ? { reasoningEffort } : {}),
+    };
+  }
+  return reasoningEffort ? { reasoningEffort } : undefined;
 }
 
 export function normalizePresetPolicy(value: unknown): PresetToolPolicy {

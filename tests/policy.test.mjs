@@ -42,6 +42,39 @@ describe("tool-manager policy", () => {
     });
   });
 
+  it("keeps a generation model, its effort, and an effort without a pinned route", () => {
+    assert.deepEqual(normalizeSettings({
+      presets: {},
+      generation: { provider: " magpie ", model: " opencode-go/deepseek-v4.1-flash ", reasoningEffort: " low " },
+    }), {
+      presets: {},
+      generation: { provider: "magpie", model: "opencode-go/deepseek-v4.1-flash", reasoningEffort: "low" },
+    });
+
+    // No complete route: the plugin keeps running the deployment default model,
+    // so a chosen level is still worth storing on its own.
+    assert.deepEqual(normalizeSettings({ presets: {}, generation: { reasoningEffort: " low " } }), {
+      presets: {},
+      generation: { reasoningEffort: "low" },
+    });
+    // A half-written route is dropped rather than stored as unusable.
+    assert.deepEqual(normalizeSettings({ presets: {}, generation: { provider: "magpie" } }), { presets: {} });
+    assert.deepEqual(normalizeSettings({ presets: {}, generation: { provider: "", model: "m" } }), { presets: {} });
+    assert.deepEqual(normalizeSettings({ presets: {}, generation: { provider: "p", model: "m" } }), {
+      presets: {},
+      generation: { provider: "p", model: "m" },
+    });
+    assert.deepEqual(normalizeSettings({ presets: {}, generation: null }), { presets: {} });
+    assert.deepEqual(normalizeSettings({ presets: {}, generation: "magpie/chat" }), { presets: {} });
+    assert.deepEqual(normalizeSettings({ presets: {}, generation: { reasoningEffort: "" } }), { presets: {} });
+
+    // An omitted effort means "let the model decide", not an empty effort.
+    assert.deepEqual(normalizeSettings({ presets: {}, generation: { provider: "p", model: "m", reasoningEffort: "" } }), {
+      presets: {},
+      generation: { provider: "p", model: "m" },
+    });
+  });
+
   it("matches exact names and wildcard groups", () => {
     assert.equal(matchesPattern("mcp__github__issue", "mcp__*"), true);
     assert.equal(matchesPattern("read", "read"), true);
